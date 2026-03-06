@@ -45,6 +45,13 @@ This manual is for daily staff operation. No hidden-tab edits are required.
 
 Use `Priority Order` as default. Use `Location Wave` when you want fewer location switches.
 
+## Checklist Entry Fields
+
+- `Pull`: enter units pulled (numeric, `0` or greater)
+- `Done`: check when item is completed
+- `Restock Status` (optional): `To Pull`, `In Progress`, `Done`, `Blocked`
+- `Notes`: use dropdown suggestions when blocked (`No Backstock`, `Can't Find`, etc.) or enter free text
+
 ## Store Profile Notes
 
 ### Albany

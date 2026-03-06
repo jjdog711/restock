@@ -1,0 +1,4 @@
+﻿fixture_file,profile_id,expected_checklist_rows_min,expected_checklist_rows_max,expected_compliance_flagged_min,expected_compliance_flagged_max,last_verified_on
+Albany_Valuation Report_Report Details_03052026_132100.csv,ALBANY,1,5,5,10,2026-03-06
+Latham_Valuation Report_Report Details_03052026_140857.csv,LATHAM,160,190,0,9999,2026-03-06
+test_sample_v2_20251218.csv,ALBANY,0,9999,0,9999,2026-03-06

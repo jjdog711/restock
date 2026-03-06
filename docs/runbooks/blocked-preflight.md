@@ -8,7 +8,7 @@ status: active
 
 # Runbook: BLOCKED_PREFLIGHT
 
-Outcome code: $(System.Collections.Hashtable.outcome)
+Outcome code: `BLOCKED_PREFLIGHT`
 
 ## Typical Cause
 

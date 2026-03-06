@@ -8,7 +8,9 @@ status: active
 
 # Runbooks Index
 
-Use these by matching the latest `Run_Journal.outcome` value.
+Use this section when `Run Daily Update`, `Run Checklist Only`, or `Run Compliance Only` does not finish cleanly.
+
+Staff should stop here and escalate to a manager. Managers and admins should match the latest `Run_Journal.outcome` value.
 
 - [BLOCKED_SCHEMA](blocked-schema.md)
 - [BLOCKED_PREFLIGHT](blocked-preflight.md)

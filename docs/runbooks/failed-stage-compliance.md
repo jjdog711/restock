@@ -8,7 +8,7 @@ status: active
 
 # Runbook: FAILED_STAGE_COMPLIANCE
 
-Outcome code: $(System.Collections.Hashtable.outcome)
+Outcome code: `FAILED_STAGE_COMPLIANCE`
 
 ## Typical Cause
 

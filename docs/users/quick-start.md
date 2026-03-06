@@ -45,6 +45,7 @@ Daily workflow stays simple.
 - Open `Restock List`
 - Follow `First Pull From` then `Then Pull From`
 - Enter pulled units in `Pull` and mark `Done`
+- If blocked, set status to `Blocked` and choose a reason in `Notes`
 
 ## 7. Confirm compliance completion
 

@@ -29,6 +29,7 @@ Print this for the vault station.
 
 - Pull from `First Pull From` before `Then Pull From`
 - Enter pulled units in `Pull`
+- If blocked, set status to `Blocked` and pick a `Notes` reason
 - Mark `Done` when complete
 
 ## Compliance Rules

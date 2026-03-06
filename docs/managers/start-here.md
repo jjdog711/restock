@@ -41,7 +41,8 @@ You keep operational control while the system handles repetitive scanning and tr
 3. Review `Backstock Alerts` for immediate shortages.
 4. Review `Compliance Alerts` for THC/expiration gaps.
 5. Check unknown-location queue count for new mapping needs.
-6. If run outcome is `BLOCKED_*` or `FAILED_*`, open diagnostics and use runbooks.
+6. Open `Restock Settings` to confirm `Policy Preset`, `Global Pull Cap`, and `Checklist View` are correct.
+7. If run outcome is `BLOCKED_*` or `FAILED_*`, open diagnostics and use runbooks.
 
 ## When To Trust vs Verify
 

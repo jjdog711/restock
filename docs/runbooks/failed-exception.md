@@ -8,7 +8,7 @@ status: active
 
 # Runbook: FAILED_EXCEPTION
 
-Outcome code: $(System.Collections.Hashtable.outcome)
+Outcome code: `FAILED_EXCEPTION`
 
 ## Typical Cause
 

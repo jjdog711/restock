@@ -8,7 +8,7 @@ status: active
 
 # Runbook: BLOCKED_SCHEMA
 
-Outcome code: $(System.Collections.Hashtable.outcome)
+Outcome code: `BLOCKED_SCHEMA`
 
 ## Typical Cause
 

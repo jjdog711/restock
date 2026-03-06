@@ -25,6 +25,23 @@ Optional deep dive. Read this after:
 5. Review `Backstock Alerts` and `Compliance Alerts`
 6. Review unknown-location queue if warnings exist
 
+## Quick Stocking Controls
+
+Manager controls live on `Restock Settings` (top-right panel).
+
+- `Checklist View`: `PRIORITY` or `LOCATION_WAVE`
+- `Policy Preset`: `Balanced (Recommended)`, `Conservative`, `Aggressive`, `Custom`
+- `Global Pull Cap`: hard cap used in recommended pull formula:
+  `MIN(shortfall, reserve, pull cap)`
+- `Restock Status` model on checklist: `To Pull`, `In Progress`, `Done`, `Blocked`
+
+Usage guidance:
+
+1. Use presets for stable daily operations.
+2. Use `Custom` only when you intentionally manage rule thresholds row-by-row.
+3. Keep threshold order valid in active rules: `Target >= Warning >= Critical`.
+4. For blocked rows, use checklist `Notes` dropdown reasons before free-text notes.
+
 ## Profile Governance
 
 Source-of-truth: `System_Reference -> StoreProfiles` and `LocationProfileMap`.

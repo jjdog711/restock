@@ -8,15 +8,17 @@ status: active
 
 # Reference Index
 
+Use `Current Reference` for live work. Anything under `legacy/` is historical only and should not drive current operations or implementation changes.
+
 ## Current Reference
 
 - [Fixture Test Data](test-data/README.md)
 - [Fixture Manifest](test-data/fixture-manifest.csv)
 
-## Legacy Archive (Historical)
+## Legacy Archive (Historical Only)
 
-- `legacy/v1/specs/*`
-- `legacy/v1/agent/*`
+- [Legacy Specs](specs/README.md)
+- [Legacy Agent Docs](agent/README.md)
 
 Legacy files are preserved for historical traceability only and are not authoritative for current implementation.
 

@@ -8,7 +8,7 @@ status: active
 
 # Runbook: SKIPPED_DUPLICATE
 
-Outcome code: $(System.Collections.Hashtable.outcome)
+Outcome code: `SKIPPED_DUPLICATE`
 
 ## Typical Cause
 

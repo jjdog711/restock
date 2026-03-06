@@ -8,7 +8,7 @@ status: active
 
 # Runbook: SKIPPED_LOCKED
 
-Outcome code: $(System.Collections.Hashtable.outcome)
+Outcome code: `SKIPPED_LOCKED`
 
 ## Typical Cause
 

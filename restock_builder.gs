@@ -159,11 +159,33 @@ const CONFIG = {
     'Done', 'Notes', 'BC Match', 'Oldest Backstock Date'
   ],
   
-  // Restock status dropdown options
-  restockStatusOptions: ['To Pull', 'Pulled', 'Partial', 'No Backstock', "Can't Find"],
+  // Restock status dropdown options (simplified execution lifecycle)
+  restockStatusOptions: ['To Pull', 'In Progress', 'Done', 'Blocked'],
+
+  // Notes dropdown suggestions (kept flexible: free text is still allowed)
+  restockNoteOptions: [
+    '',
+    'No Backstock',
+    "Can't Find",
+    'Location Mismatch',
+    'Compliance Hold',
+    'Damaged/Unsellable',
+    'Manager Review',
+    'Other'
+  ],
   
   // Location role options
   locationRoleOptions: ['PICK SHELF', 'RESERVE', 'IGNORE'],
+
+  // Location notes suggestions (free text still allowed)
+  locationNoteOptions: [
+    '',
+    'Primary sales floor pick',
+    'Backstock reserve',
+    'Operational hold',
+    'Receiving / staging',
+    'Needs manager review'
+  ],
   
   // Pack style options
   packStyleOptions: ['Single', 'Pack', 'Any'],
@@ -173,6 +195,24 @@ const CONFIG = {
 
   // Workspace visibility modes
   workspaceModes: ['STANDARD', 'MANAGER']
+};
+
+const LEGACY_RESTOCK_STATUS_MAP = {
+  'TO PULL': 'To Pull',
+  'PULLED': 'Done',
+  'PARTIAL': 'In Progress',
+  'IN PROGRESS': 'In Progress',
+  'DONE': 'Done',
+  'NO BACKSTOCK': 'Blocked',
+  "CAN'T FIND": 'Blocked',
+  'CANT FIND': 'Blocked',
+  'BLOCKED': 'Blocked'
+};
+
+const LEGACY_BLOCKED_REASON_MAP = {
+  'NO BACKSTOCK': 'No Backstock',
+  "CAN'T FIND": "Can't Find",
+  'CANT FIND': "Can't Find"
 };
 
 const TAB_NAME_UPDATES = {
@@ -248,6 +288,67 @@ function migrateLegacyTabNames_(ss) {
       legacySheet.setName(preferred);
     }
   }
+}
+
+function containsMojibakeText_(value) {
+  const text = String(value || '');
+  return /[\u00e2\u00c2\uFFFD]/.test(text);
+}
+
+function getBarcodeMatchQcFormula_() {
+  return `=IF(Q2="","",MAP(Q2:Q,LAMBDA(id,IF(id="","",IF(ROWS(UNIQUE(FILTER($K$2:$K$5000,($A$2:$A$5000=id)*($K$2:$K$5000<>""))))>1,"CHECK","OK")))))`;
+}
+
+function repairLegacyEncodingArtifacts_(ss) {
+  if (!ss) return { changed: false };
+
+  let changed = false;
+  let startHereFixed = false;
+  let barcodeFormulaFixed = false;
+
+  const startHereSheet = getSheetByCompatName_(ss, 'Start Here');
+  if (startHereSheet) {
+    const rowsToScan = Math.max(1, Math.min(120, startHereSheet.getLastRow()));
+    const values = startHereSheet.getRange(1, 1, rowsToScan, 1).getDisplayValues();
+    let hasMojibake = false;
+    for (let i = 0; i < values.length; i++) {
+      if (containsMojibakeText_(values[i][0])) {
+        hasMojibake = true;
+        break;
+      }
+    }
+    if (hasMojibake) {
+      setupInstructionsTab(ss);
+      startHereFixed = true;
+      changed = true;
+    }
+  }
+
+  const engineSheet = ss.getSheetByName('Restock Engine (Internal)');
+  if (engineSheet) {
+    // AX2 on Restock Engine (Internal) holds Barcode Match QC formula.
+    const formulaCell = engineSheet.getRange(2, 50);
+    const formula = formulaCell.getFormula();
+    if (!formula || containsMojibakeText_(formula)) {
+      formulaCell.setFormula(getBarcodeMatchQcFormula_());
+      barcodeFormulaFixed = true;
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    SpreadsheetApp.flush();
+    Logger.log(
+      'Legacy encoding artifacts repaired: start_here=' + startHereFixed +
+      ', barcode_formula=' + barcodeFormulaFixed
+    );
+  }
+
+  return {
+    changed: changed,
+    startHereFixed: startHereFixed,
+    barcodeFormulaFixed: barcodeFormulaFixed
+  };
 }
 
 const CHECKLIST_SCHEMA_CONTRACT = [
@@ -373,6 +474,20 @@ const STOCKING_RULES_DATA = [
   ['Default - All Products', '', '', '', '', 7, 4, 2, true]
 ];
 
+const STOCKING_POLICY_PRESETS = [
+  { key: 'BALANCED', label: 'Balanced (Recommended)', target: 7, warning: 4, critical: 2, pullCap: 99, note: 'Recommended daily baseline for most stores.' },
+  { key: 'CONSERVATIVE', label: 'Conservative', target: 8, warning: 5, critical: 3, pullCap: 60, note: 'Higher shelf coverage; larger safety buffer.' },
+  { key: 'AGGRESSIVE', label: 'Aggressive', target: 6, warning: 3, critical: 1, pullCap: 120, note: 'Lean shelf strategy for faster turns.' },
+  { key: 'CUSTOM', label: 'Custom', target: 7, warning: 4, critical: 2, pullCap: 99, note: 'Manager controls thresholds directly in rule rows.' }
+];
+
+const STOCKING_SETTINGS_CELLS = {
+  checklistViewMode: 'L2',
+  policyPreset: 'L3',
+  globalPullCap: 'L4',
+  policyNote: 'M3'
+};
+
 // ============================================================================
 // COMPLIANCE AUDIT DEFAULTS
 // ============================================================================
@@ -446,6 +561,9 @@ const COMPLIANCE_DEFAULTS = {
   missingTokens: ['', 'N/A', 'NA', 'NULL', 'NONE', '-', '0', '0.0', '0%', '0 MG']
 };
 
+const COMPLIANCE_LOGIC_MODES = ['STATUS', 'LOCATION', 'EITHER'];
+const COMPLIANCE_PRODUCT_TYPE_SCOPES = ['ALL', 'CANNABIS_ONLY'];
+
 // ============================================================================
 // STORE PROFILES + SYSTEM REFERENCE
 // ============================================================================
@@ -492,6 +610,7 @@ const SYSTEM_REFERENCE = {
     lastChecklistRows: 'RESTOCK_LAST_CHECKLIST_ROWS',
     lastChecklistRawSignature: 'RESTOCK_LAST_CHECKLIST_RAW_SIGNATURE',
     lastChecklistRulesSignature: 'RESTOCK_LAST_CHECKLIST_RULES_SIGNATURE',
+    lastChecklistManualSchemaSignature: 'RESTOCK_LAST_CHECKLIST_MANUAL_SCHEMA_SIG',
     uiMode: 'RESTOCK_UI_MODE',
     runInProgress: 'RESTOCK_RUN_IN_PROGRESS',
     lastSuccessSignature: 'RESTOCK_LAST_SUCCESS_SIGNATURE',
@@ -730,6 +849,9 @@ function main() {
   
   Logger.log('Setting up Compliance History tab...');
   setupComplianceLogTab(ss);
+
+  // Repair any legacy mojibake artifacts if this workbook was built from older script text.
+  repairLegacyEncodingArtifacts_(ss);
   
   // Step 3: Apply formatting
   Logger.log('Applying formatting...');
@@ -773,6 +895,122 @@ function main() {
  * Tie-breaking: If same specificity, lower Target wins (more conservative).
  * Fallback: Default rule from table if no custom rules match.
  */
+function getPolicyPresetByLabel_(label) {
+  const wanted = String(label || '').trim();
+  if (!wanted) return null;
+  for (let i = 0; i < STOCKING_POLICY_PRESETS.length; i++) {
+    if (STOCKING_POLICY_PRESETS[i].label === wanted) {
+      return STOCKING_POLICY_PRESETS[i];
+    }
+  }
+  return null;
+}
+
+function getPolicyPresetOptions_() {
+  return STOCKING_POLICY_PRESETS.map(function(p) { return p.label; });
+}
+
+function parsePositiveNumber_(value, fallback) {
+  const parsed = parseFloat(value);
+  if (!isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function isValidThresholdTriple_(target, warning, critical) {
+  return isFinite(target) &&
+    isFinite(warning) &&
+    isFinite(critical) &&
+    target > 0 &&
+    warning >= 0 &&
+    critical >= 0 &&
+    target >= warning &&
+    warning >= critical;
+}
+
+function getChecklistManualSchemaSignature_() {
+  return JSON.stringify({
+    pull: 'NUMBER_GE_ZERO',
+    status: CONFIG.restockStatusOptions,
+    notes: CONFIG.restockNoteOptions
+  });
+}
+
+function normalizeChecklistStatusValue_(value) {
+  const token = normalizeToken_(String(value || '').replace(/\u2019/g, "'"));
+  if (!token) return '';
+  return LEGACY_RESTOCK_STATUS_MAP[token] || '';
+}
+
+function getLegacyBlockedReason_(value) {
+  const token = normalizeToken_(String(value || '').replace(/\u2019/g, "'"));
+  return LEGACY_BLOCKED_REASON_MAP[token] || '';
+}
+
+function syncStockingPolicyControls_(settingsSheet) {
+  if (!settingsSheet) return { updated: false };
+
+  const rulesStartRow = parseInt(settingsSheet.getRange('N3').getValue(), 10) || 63;
+  const rulesEndRow = parseInt(settingsSheet.getRange('N4').getValue(), 10) || (rulesStartRow + STOCKING_RULES_DATA.length - 1);
+  const defaultRuleRow = Math.max(rulesStartRow, rulesEndRow);
+
+  const presetCell = settingsSheet.getRange(STOCKING_SETTINGS_CELLS.policyPreset);
+  const pullCapCell = settingsSheet.getRange(STOCKING_SETTINGS_CELLS.globalPullCap);
+  const noteCell = settingsSheet.getRange(STOCKING_SETTINGS_CELLS.policyNote);
+
+  const fallbackPreset = STOCKING_POLICY_PRESETS[0];
+  const customPreset = STOCKING_POLICY_PRESETS[STOCKING_POLICY_PRESETS.length - 1];
+  const presetText = String(presetCell.getDisplayValue() || '').trim();
+  let preset = getPolicyPresetByLabel_(presetText) || (presetText ? fallbackPreset : customPreset);
+  let updated = false;
+
+  if (presetCell.getDisplayValue() !== preset.label) {
+    presetCell.setValue(preset.label);
+    updated = true;
+  }
+
+  // Non-custom presets drive default thresholds directly for predictable behavior.
+  if (preset.key !== 'CUSTOM') {
+    const existing = settingsSheet.getRange(defaultRuleRow, 6, 1, 3).getValues()[0];
+    if (Number(existing[0]) !== preset.target || Number(existing[1]) !== preset.warning || Number(existing[2]) !== preset.critical) {
+      settingsSheet.getRange(defaultRuleRow, 6, 1, 3).setValues([[preset.target, preset.warning, preset.critical]]);
+      updated = true;
+    }
+    const currentName = String(settingsSheet.getRange(defaultRuleRow, 1).getDisplayValue() || '').trim();
+    if (currentName !== 'Default - All Products') {
+      settingsSheet.getRange(defaultRuleRow, 1).setValue('Default - All Products');
+      updated = true;
+    }
+    if (settingsSheet.getRange(defaultRuleRow, 9).getValue() !== true) {
+      settingsSheet.getRange(defaultRuleRow, 9).setValue(true);
+      updated = true;
+    }
+  }
+
+  const expectedPullCap = preset.key === 'CUSTOM'
+    ? parsePositiveNumber_(pullCapCell.getValue(), fallbackPreset.pullCap)
+    : preset.pullCap;
+  const currentPullCap = parsePositiveNumber_(pullCapCell.getValue(), -1);
+  if (currentPullCap !== expectedPullCap) {
+    pullCapCell.setValue(expectedPullCap);
+    updated = true;
+  }
+
+  const note = preset.key === 'CUSTOM'
+    ? 'Custom mode: edit Target/Warning/Critical in active rule rows. Keep Target >= Warning >= Critical.'
+    : preset.note + ' Default rule thresholds are auto-managed by this preset.';
+  if (String(noteCell.getDisplayValue() || '') !== note) {
+    noteCell.setValue(note);
+    updated = true;
+  }
+
+  return {
+    updated: updated,
+    preset: preset.label,
+    pullCap: expectedPullCap,
+    defaultRuleRow: defaultRuleRow
+  };
+}
+
 function applyStockingRules() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const settingsSheet = ss.getSheetByName('Restock Settings');
@@ -782,6 +1020,9 @@ function applyStockingRules() {
     Logger.log('Required sheets not found. Run main() first.');
     return;
   }
+
+  // Keep quick controls and default rule thresholds in sync before matching.
+  syncStockingPolicyControls_(settingsSheet);
   
   // Read rules table bounds from metadata (N3:N4). Fallback to legacy positions.
   const rulesStartRow = parseInt(settingsSheet.getRange('N3').getValue(), 10) || 63;
@@ -793,25 +1034,40 @@ function applyStockingRules() {
   const rulesData = rulesRange.getValues();
   
   // Parse rules into objects for easier matching
-  const rules = rulesData.map((row, index) => ({
-    index: index,
-    name: row[0] || '',
-    brand: (row[1] || '').toString().toUpperCase().trim(),
-    productType: (row[2] || '').toString().toUpperCase().trim(),
-    size: (row[3] || '').toString().toUpperCase().trim(),
-    nameContains: (row[4] || '').toString().toUpperCase().trim(),
-    target: row[5],
-    warning: row[6],
-    critical: row[7],
-    active: row[8] === true
-  })).filter(rule => rule.active && rule.target > 0); // Only active rules with valid Target
+  const parsedRules = rulesData.map((row, index) => {
+    const target = parseFloat(row[5]);
+    const warning = parseFloat(row[6]);
+    const critical = parseFloat(row[7]);
+    return {
+      index: index,
+      name: row[0] || '',
+      brand: (row[1] || '').toString().toUpperCase().trim(),
+      productType: (row[2] || '').toString().toUpperCase().trim(),
+      size: (row[3] || '').toString().toUpperCase().trim(),
+      nameContains: (row[4] || '').toString().toUpperCase().trim(),
+      target: target,
+      warning: warning,
+      critical: critical,
+      active: row[8] === true,
+      validThresholds: isValidThresholdTriple_(target, warning, critical)
+    };
+  });
+  const rules = parsedRules.filter(function(rule) {
+    return rule.active && rule.validThresholds;
+  }); // Only active rules with valid threshold order
+  const invalidActiveRules = parsedRules.filter(function(rule) {
+    return rule.active && !rule.validThresholds;
+  }).length;
+  if (invalidActiveRules > 0) {
+    Logger.log('Ignored ' + invalidActiveRules + ' active stocking rules with invalid thresholds.');
+  }
   
   Logger.log('Found ' + rules.length + ' active rules');
   
   // Find the default rule (should be last active rule with no criteria)
-  const defaultRule = rules.find(r => 
-    r.brand === '' && r.productType === '' && r.size === '' && r.nameContains === ''
-  ) || { name: 'Default', target: 7, warning: 4, critical: 2 };
+  const defaultRule = rules.find(function(r) {
+    return r.brand === '' && r.productType === '' && r.size === '' && r.nameContains === '';
+  }) || { name: 'Default - All Products', target: 7, warning: 4, critical: 2 };
   
   // Read products from Engine tab
   // Product summary starts at column Q (17), we need Q-V for matching (External ID, Brand, Name, Type, Subtype, Size)
@@ -910,11 +1166,13 @@ function applyStockingRules() {
 
 function computeStockingRulesSignature_(settingsSheet) {
   if (!settingsSheet) return '';
+  syncStockingPolicyControls_(settingsSheet);
   const rulesStartRow = parseInt(settingsSheet.getRange('N3').getValue(), 10) || 63;
   const rulesEndRow = parseInt(settingsSheet.getRange('N4').getValue(), 10) || (rulesStartRow + STOCKING_RULES_DATA.length - 1);
   const rulesRowCount = Math.max(1, rulesEndRow - rulesStartRow + 1);
   const values = settingsSheet.getRange(rulesStartRow, 1, rulesRowCount, 9).getDisplayValues();
-  return computeTextHash_(safeJson_(values));
+  const controls = settingsSheet.getRange('L3:L4').getDisplayValues();
+  return computeTextHash_(safeJson_({ rules: values, controls: controls }));
 }
 
 function runDailyUpdate() {
@@ -938,6 +1196,7 @@ function runChecklistOnly() {
 function runComplianceOnly() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   migrateLegacyTabNames_(ss);
+  repairLegacyEncodingArtifacts_(ss);
   ensureSystemDiagnosticsTab_(ss);
   const schemaGate = validateRunSchemaGate_(ss, {
     includeChecklist: false,
@@ -1507,6 +1766,7 @@ function runDailyUpdate_(options) {
     ensureNoReserveRiskTab_(ss);
     ensureSystemDiagnosticsTab_(ss);
     ensureAIDiagnosticsTab_(ss);
+    repairLegacyEncodingArtifacts_(ss);
     logRunStageEvent_(ss, runCtx, 'RUN_START', 'INFO', 'pipeline', {
       include_checklist: includeChecklist,
       include_compliance: includeCompliance,
@@ -2775,30 +3035,79 @@ function refreshChecklist(options) {
   const previousRows = parseInt(lastChecklistRowsProp || '0', 10);
   const previousRowsSafe = isNaN(previousRows) ? 0 : previousRows;
   const hasPriorState = lastChecklistRowsProp !== null;
-  const structuralRefreshNeeded = !hasPriorState || previousRowsSafe !== dataRowCount || opts.forceChecklistStructure === true;
+  const manualSchemaSignature = getChecklistManualSchemaSignature_();
+  const previousManualSchemaSignature = docProps.getProperty(SYSTEM_REFERENCE.props.lastChecklistManualSchemaSignature) || '';
+  const manualSchemaChanged = manualSchemaSignature !== previousManualSchemaSignature;
+  const structuralRefreshNeeded = !hasPriorState || previousRowsSafe !== dataRowCount || opts.forceChecklistStructure === true || manualSchemaChanged;
   metrics.previousRows = previousRowsSafe;
   metrics.structuralRefresh = structuralRefreshNeeded;
+  metrics.manualSchemaChanged = manualSchemaChanged;
 
   // Reset checkbox values every run; only rebuild validation/formatting when structure changes.
   const clearRange = Math.max(200, dataRowCount, previousRowsSafe);
   metrics.clearRange = clearRange;
+
+  runTimedStep_(stepDurations, 'normalize_manual_status', function() {
+    const statusRange = sheet.getRange(dataStartRow, 14, dataRowCount, 1);
+    const notesRange = sheet.getRange(dataStartRow, 16, dataRowCount, 1);
+    const statusValues = statusRange.getDisplayValues();
+    const noteValues = notesRange.getDisplayValues();
+    let statusChanges = 0;
+    let noteSeeds = 0;
+
+    for (let i = 0; i < dataRowCount; i++) {
+      const originalStatus = statusValues[i][0];
+      const normalizedStatus = normalizeChecklistStatusValue_(originalStatus);
+      if (normalizedStatus !== originalStatus) {
+        statusValues[i][0] = normalizedStatus;
+        statusChanges++;
+      }
+      if (normalizedStatus === 'Blocked' && !String(noteValues[i][0] || '').trim()) {
+        const reason = getLegacyBlockedReason_(originalStatus);
+        if (reason) {
+          noteValues[i][0] = reason;
+          noteSeeds++;
+        }
+      }
+    }
+
+    if (statusChanges > 0) statusRange.setValues(statusValues);
+    if (noteSeeds > 0) notesRange.setValues(noteValues);
+    metrics.legacyStatusNormalized = statusChanges;
+    metrics.legacyBlockedNotesSeeded = noteSeeds;
+  });
+
   runTimedStep_(stepDurations, 'reset_done_column', function() {
     sheet.getRange(dataStartRow, 15, clearRange, 1).clearContent(); // Clear checkbox values
   });
 
   if (structuralRefreshNeeded) {
     runTimedStep_(stepDurations, 'clear_validation_ranges', function() {
+      sheet.getRange(dataStartRow, 13, clearRange, 1).clearDataValidations(); // Pull column
       sheet.getRange(dataStartRow, 14, clearRange, 1).clearDataValidations(); // Status column
       sheet.getRange(dataStartRow, 15, clearRange, 1).clearDataValidations(); // Done column (removes checkboxes)
+      sheet.getRange(dataStartRow, 16, clearRange, 1).clearDataValidations(); // Notes suggestions
     });
     
-    // Add data validation for Restock Status column (exactly dataRowCount rows)
+    // Add data validation controls for pull + status + notes (exactly dataRowCount rows)
     runTimedStep_(stepDurations, 'apply_validation_controls', function() {
+      const pullValidation = SpreadsheetApp.newDataValidation()
+        .requireNumberGreaterThanOrEqualTo(0)
+        .setAllowInvalid(false)
+        .build();
+      sheet.getRange(dataStartRow, 13, dataRowCount, 1).setDataValidation(pullValidation);
+
       const statusValidation = SpreadsheetApp.newDataValidation()
         .requireValueInList(CONFIG.restockStatusOptions, true)
         .setAllowInvalid(false)
         .build();
       sheet.getRange(dataStartRow, 14, dataRowCount, 1).setDataValidation(statusValidation);
+
+      const noteValidation = SpreadsheetApp.newDataValidation()
+        .requireValueInList(CONFIG.restockNoteOptions, true)
+        .setAllowInvalid(true)
+        .build();
+      sheet.getRange(dataStartRow, 16, dataRowCount, 1).setDataValidation(noteValidation);
       
       // Add checkboxes for Done column (exactly dataRowCount rows)
       sheet.getRange(dataStartRow, 15, dataRowCount, 1).insertCheckboxes();
@@ -2876,6 +3185,7 @@ function refreshChecklist(options) {
   }
   runTimedStep_(stepDurations, 'persist_last_row_count', function() {
     docProps.setProperty(SYSTEM_REFERENCE.props.lastChecklistRows, String(dataRowCount));
+    docProps.setProperty(SYSTEM_REFERENCE.props.lastChecklistManualSchemaSignature, manualSchemaSignature);
   });
   metrics.rowsChanged = dataRowCount;
   
@@ -2886,6 +3196,9 @@ function refreshChecklist(options) {
     clear_range: clearRange,
     previous_rows: previousRowsSafe,
     structural_refresh: structuralRefreshNeeded,
+    manual_schema_changed: manualSchemaChanged,
+    legacy_status_normalized: metrics.legacyStatusNormalized || 0,
+    legacy_blocked_notes_seeded: metrics.legacyBlockedNotesSeeded || 0,
     rules_shortcut_applied: metrics.rulesShortcutApplied === true
   };
   const stepMetrics = summarizeStepDurations_(stepDurations);
@@ -2925,6 +3238,7 @@ function onOpen() {
     ensureSystemDiagnosticsTab_(ss);
     ensureAIDiagnosticsTab_(ss);
     ensureChecklistViewConfig_(ss);
+    repairLegacyEncodingArtifacts_(ss);
     refreshDailyHomeHealthFromState_(ss);
     applyWorkspaceView_(ss, storedMode, { silent: true, persist: false });
   } catch (error) {
@@ -2957,6 +3271,7 @@ function addRestockMenu_(storedMode) {
 
   const menu = ui.createMenu('Restock')
     .addItem('Open Home', 'openDailyHome')
+    .addItem('Open Settings', 'openRestockSettings')
     .addSeparator()
     .addItem('Run Daily Update', 'runDailyUpdate')
     .addSeparator()
@@ -3203,12 +3518,19 @@ function runSystemCheck() {
   if (!settingsSheet) {
     configIntegrity = 'MISSING_RESTOCK_SETTINGS';
   } else {
+    syncStockingPolicyControls_(settingsSheet);
     const n1 = parseInt(settingsSheet.getRange('N1').getValue(), 10);
     const n2 = parseInt(settingsSheet.getRange('N2').getValue(), 10);
     const n3 = parseInt(settingsSheet.getRange('N3').getValue(), 10);
     const n4 = parseInt(settingsSheet.getRange('N4').getValue(), 10);
+    const preset = getPolicyPresetByLabel_(settingsSheet.getRange(STOCKING_SETTINGS_CELLS.policyPreset).getDisplayValue());
+    const pullCap = parsePositiveNumber_(settingsSheet.getRange(STOCKING_SETTINGS_CELLS.globalPullCap).getValue(), -1);
     if (isNaN(n1) || isNaN(n2) || isNaN(n3) || isNaN(n4) || n1 < 1 || n3 < 1) {
       configIntegrity = 'METADATA_INVALID';
+    } else if (!preset) {
+      configIntegrity = 'POLICY_PRESET_INVALID';
+    } else if (pullCap <= 0) {
+      configIntegrity = 'PULL_CAP_INVALID';
     }
   }
   checks.push('Config integrity: ' + configIntegrity);
@@ -3304,6 +3626,7 @@ function clearImportData() {
   props.deleteProperty(SYSTEM_REFERENCE.props.lastChecklistRows);
   props.deleteProperty(SYSTEM_REFERENCE.props.lastChecklistRawSignature);
   props.deleteProperty(SYSTEM_REFERENCE.props.lastChecklistRulesSignature);
+  props.deleteProperty(SYSTEM_REFERENCE.props.lastChecklistManualSchemaSignature);
   props.deleteProperty(SYSTEM_REFERENCE.props.runInProgress);
   props.deleteProperty(SYSTEM_REFERENCE.props.lastSuccessSignature);
   props.deleteProperty(SYSTEM_REFERENCE.props.lastRunId);
@@ -3364,6 +3687,7 @@ function createAllTabs(ss) {
 function setupDailyHomeTab(ss) {
   const sheet = ensureSheetByCompatName_(ss, 'Home');
   sheet.clear();
+  sheet.setHiddenGridlines(true);
 
   sheet.getRange('A1').setValue('VAULT RESTOCK HOME').setFontSize(18).setFontWeight('bold');
   sheet.getRange('A2').setValue('One primary action: Restock -> Run Daily Update');
@@ -3373,9 +3697,9 @@ function setupDailyHomeTab(ss) {
   const workflow = [
     ['1. Import Treez CSV into "Treez Valuation (Raw)" at A6'],
     ['2. Run Restock -> Run Daily Update'],
-    ['3. Review "Backstock Alerts" first'],
-    ['4. Work "Restock List"'],
-    ['5. Resolve "Compliance Alerts" issues']
+    ['3. If opened automatically, resolve "Compliance Alerts" issues first'],
+    ['4. Review "Backstock Alerts" for zero-reserve risks'],
+    ['5. Work "Restock List" pulls']
   ];
   sheet.getRange(5, 1, workflow.length, 1).setValues(workflow);
 
@@ -3399,6 +3723,7 @@ function setupDailyHomeTab(ss) {
     ['Backstock Alerts', buildSheetLinkFormula_(ss, 'Backstock Alerts', 'Open Backstock Alerts')],
     ['Compliance Alerts', buildSheetLinkFormula_(ss, 'Compliance Alerts', 'Open Compliance Alerts')],
     ['Raw Import', buildSheetLinkFormula_(ss, 'Treez Valuation (Raw)', 'Open Raw Import')],
+    ['Restock Settings (Manager)', buildSheetLinkFormula_(ss, 'Restock Settings', 'Open Settings')],
     ['Diagnostics (Manager)', buildSheetLinkFormula_(ss, DIAGNOSTICS.sheetName, 'Open Diagnostics')]
   ];
   sheet.getRange(23, 1, quickOpenRows.length, 2).setValues(quickOpenRows);
@@ -3539,6 +3864,18 @@ function openDailyHome() {
   }
 }
 
+function openRestockSettings() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName('Restock Settings');
+  if (!sheet) {
+    setupRestockSettingsTab(ss);
+    sheet = ss.getSheetByName('Restock Settings');
+  }
+  if (sheet) {
+    ss.setActiveSheet(sheet);
+  }
+}
+
 // ============================================================================
 // INSTRUCTIONS TAB
 // ============================================================================
@@ -3546,6 +3883,7 @@ function openDailyHome() {
 function setupInstructionsTab(ss) {
   const sheet = ensureSheetByCompatName_(ss, 'Start Here');
   sheet.clear();
+  sheet.setHiddenGridlines(true);
   
   const instructions = [
     ['VAULT RESTOCK SYSTEM - START HERE'],
@@ -3588,10 +3926,13 @@ function setupInstructionsTab(ss) {
     ['    - Check "First Pull From" for location and quantity'],
     ['    - Pull units and bring to sales floor'],
     ['    - Enter actual units pulled in "Pull" column'],
+    ['    - If needed, set status to In Progress or Blocked (status column can be unhidden)'],
+    ['    - Use Notes dropdown reasons for blocked items'],
     ['    - Check "Done" when complete'],
     [''],
     ['MENU OPTIONS'],
     [''],
+    ['Restock -> Open Settings - Open manager settings center for policy/location controls'],
     ['Restock -> Run Daily Update - Run full checklist + compliance pipeline'],
     ['Restock -> Run Checklist Only - Refresh staff checklist only'],
     ['Restock -> Run Compliance Only - Re-run compliance report only'],
@@ -3644,6 +3985,7 @@ function setupInstructionsTab(ss) {
 function setupTreezValuationTab(ss) {
   const sheet = ss.getSheetByName('Treez Valuation (Raw)');
   sheet.clear();
+  sheet.setHiddenGridlines(false);
   
   // Import instructions (rows 1-5)
   const instructions = [
@@ -4439,6 +4781,14 @@ function syncLocationRolesForProfile_(ss, profileId, options) {
       settingsSheet.getRange(locStart, 2, maxRows, 1).setDataValidation(roleValidation);
     });
 
+    runTimedStep_(stepDurations, 'apply_note_validation', function() {
+      const noteValidation = SpreadsheetApp.newDataValidation()
+        .requireValueInList(CONFIG.locationNoteOptions, true)
+        .setAllowInvalid(true)
+        .build();
+      settingsSheet.getRange(locStart, 4, maxRows, 1).setDataValidation(noteValidation);
+    });
+
     runTimedStep_(stepDurations, 'apply_include_checkboxes', function() {
       const previousRows = previousLocEnd >= locStart ? (previousLocEnd - locStart + 1) : 0;
       const checkboxRows = Math.max(1, profileRows.length, previousRows);
@@ -4460,6 +4810,24 @@ function syncLocationRolesForProfile_(ss, profileId, options) {
       }
     });
   }
+
+  runTimedStep_(stepDurations, 'ensure_note_validation', function() {
+    let hasNoteValidation = false;
+    const firstValidation = settingsSheet.getRange(locStart, 4).getDataValidation();
+    if (firstValidation &&
+        firstValidation.getCriteriaType() === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
+      const criteriaValues = firstValidation.getCriteriaValues() || [];
+      const valueList = criteriaValues.length > 0 ? (criteriaValues[0] || []) : [];
+      hasNoteValidation = valueList.length === CONFIG.locationNoteOptions.length;
+    }
+    if (!hasNoteValidation) {
+      const noteValidation = SpreadsheetApp.newDataValidation()
+        .requireValueInList(CONFIG.locationNoteOptions, true)
+        .setAllowInvalid(true)
+        .build();
+      settingsSheet.getRange(locStart, 4, maxRows, 1).setDataValidation(noteValidation);
+    }
+  });
 
   const nextLocEnd = profileRows.length > 0 ? (locStart + profileRows.length - 1) : (locStart - 1);
   runTimedStep_(stepDurations, 'write_metadata', function() {
@@ -4531,24 +4899,64 @@ function computeTextHash_(payload) {
 function setupRestockSettingsTab(ss) {
   const sheet = ss.getSheetByName('Restock Settings');
   sheet.clear();
-
-  // ==================== LOCATION ROLES SECTION ====================
-  let currentRow = 1;
-  sheet.getRange(currentRow, 1).setValue('LOCATION ROLES');
-  sheet.getRange(currentRow, 1).setFontSize(14).setFontWeight('bold').setBackground(CONFIG.colors.settingsHeader);
-  currentRow++;
+  sheet.setHiddenGridlines(true);
 
   const activeProfile = resolveActiveStoreProfile_(ss, { allowOverride: true, useRawData: true });
-  sheet.getRange(currentRow, 1).setValue('Maps Treez location names to roles for the restock engine');
-  sheet.getRange(currentRow, 6).setValue('Active Profile: ' + activeProfile.profileId).setFontWeight('bold');
-  sheet.getRange(currentRow, 11).setValue('Checklist View Mode').setFontWeight('bold');
-  sheet.getRange(currentRow, 12).setValue('PRIORITY');
+  const defaultPreset = STOCKING_POLICY_PRESETS[0];
+
+  sheet.getRange('A1').setValue('RESTOCK SETTINGS CENTER').setFontSize(16).setFontWeight('bold');
+  sheet.getRange('A2').setValue('Manager controls for location mapping, stocking policy, pull caps, and checklist behavior.');
+  sheet.getRange('A3').setValue('Use dropdowns, checkboxes, and validated numeric cells where provided.');
+  sheet.getRange('A2:A3').setBackground(CONFIG.colors.instructionBg);
+  sheet.getRange('F2').setValue('Active Profile: ' + activeProfile.profileId).setFontWeight('bold');
+
+  sheet.getRange('K1').setValue('QUICK STOCKING CONTROLS')
+    .setFontWeight('bold')
+    .setBackground(CONFIG.colors.settingsHeader);
+  sheet.getRange('K2').setValue('Checklist View').setFontWeight('bold');
+  sheet.getRange(STOCKING_SETTINGS_CELLS.checklistViewMode).setValue('PRIORITY');
   const sortModeValidation = SpreadsheetApp.newDataValidation()
     .requireValueInList(CONFIG.checklistSortModes, true)
     .setAllowInvalid(false)
     .build();
-  sheet.getRange(currentRow, 12).setDataValidation(sortModeValidation);
-  sheet.getRange(currentRow, 13).setValue('PRIORITY = urgency order | LOCATION_WAVE = grouped by First Pull From');
+  sheet.getRange(STOCKING_SETTINGS_CELLS.checklistViewMode).setDataValidation(sortModeValidation);
+  sheet.getRange('M2').setValue('PRIORITY = urgency order | LOCATION_WAVE = grouped by First Pull From');
+
+  sheet.getRange('K3').setValue('Policy Preset').setFontWeight('bold');
+  sheet.getRange(STOCKING_SETTINGS_CELLS.policyPreset).setValue(defaultPreset.label);
+  const presetValidation = SpreadsheetApp.newDataValidation()
+    .requireValueInList(getPolicyPresetOptions_(), true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(STOCKING_SETTINGS_CELLS.policyPreset).setDataValidation(presetValidation);
+
+  sheet.getRange('K4').setValue('Global Pull Cap').setFontWeight('bold');
+  sheet.getRange(STOCKING_SETTINGS_CELLS.globalPullCap).setValue(defaultPreset.pullCap).setNumberFormat('0');
+  const pullCapValidation = SpreadsheetApp.newDataValidation()
+    .requireNumberGreaterThan(0)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(STOCKING_SETTINGS_CELLS.globalPullCap).setDataValidation(pullCapValidation);
+  sheet.getRange('M4').setValue('Recommended Pull = MIN(shortfall, reserve, pull cap).');
+
+  const presetTableStartCol = 16; // Col P
+  const presetHeaders = ['Preset', 'Target', 'Warning', 'Critical', 'Pull Cap', 'Notes'];
+  const presetRows = STOCKING_POLICY_PRESETS.map(function(p) {
+    return [p.label, p.target, p.warning, p.critical, p.pullCap, p.note];
+  });
+  sheet.getRange(1, presetTableStartCol, 1, presetHeaders.length)
+    .setValues([presetHeaders])
+    .setFontWeight('bold')
+    .setBackground(CONFIG.colors.header);
+  sheet.getRange(2, presetTableStartCol, presetRows.length, presetHeaders.length).setValues(presetRows);
+
+  // ==================== LOCATION ROLES SECTION ====================
+  let currentRow = 6;
+  sheet.getRange(currentRow, 1).setValue('LOCATION ROLES');
+  sheet.getRange(currentRow, 1).setFontSize(14).setFontWeight('bold').setBackground(CONFIG.colors.settingsHeader);
+  currentRow++;
+
+  sheet.getRange(currentRow, 1).setValue('Map Treez location names to PICK SHELF, RESERVE, or IGNORE.');
   currentRow += 2;
 
   const locHeaders = ['Location Name', 'Location Role', 'Include in Engine', 'Notes'];
@@ -4569,25 +4977,38 @@ function setupRestockSettingsTab(ss) {
     .build();
   sheet.getRange(locDataStartRow, 2, maxLocationRows, 1).setDataValidation(locRoleValidation);
 
+  const locNoteValidation = SpreadsheetApp.newDataValidation()
+    .requireValueInList(CONFIG.locationNoteOptions, true)
+    .setAllowInvalid(true)
+    .build();
+  sheet.getRange(locDataStartRow, 4, maxLocationRows, 1).setDataValidation(locNoteValidation);
+
   const includeRange = sheet.getRange(locDataStartRow, 3, maxLocationRows, 1);
   includeRange.insertCheckboxes();
 
-  currentRow += maxLocationRows + 3;
+  const locSectionStartRow = 6;
+  const locSectionEndRow = locDataStartRow + maxLocationRows - 1;
+  sheet.getRange(locSectionStartRow, 1, locSectionEndRow - locSectionStartRow + 1, 4)
+    .setBorder(true, true, true, true, false, false, CONFIG.colors.border, SpreadsheetApp.BorderStyle.SOLID);
+
+  currentRow = locDataStartRow + maxLocationRows + 2;
 
   // ==================== STOCKING RULES SECTION ====================
   sheet.getRange(currentRow, 1).setValue('STOCKING RULES');
   sheet.getRange(currentRow, 1).setFontSize(14).setFontWeight('bold').setBackground(CONFIG.colors.settingsHeader);
   currentRow++;
 
-  sheet.getRange(currentRow, 1).setValue('Create custom restock rules. Fill in optional filter criteria (Brand, Type, Size, Name Contains).');
+  sheet.getRange(currentRow, 1).setValue('Create optional rule filters (Brand, Type, Size, Name Contains).');
   currentRow++;
-  sheet.getRange(currentRow, 1).setValue('Rules are matched by SPECIFICITY: more criteria filled = higher priority. Default rule catches everything else.');
+  sheet.getRange(currentRow, 1).setValue('Threshold rule: Target >= Warning >= Critical. Inactive rules are skipped.');
   currentRow += 2;
 
   const ruleHeaders = ['Rule Name', 'Brand', 'Product Type', 'Size', 'Name Contains',
                        'Target', 'Warning', 'Critical', 'Active'];
   sheet.getRange(currentRow, 1, 1, ruleHeaders.length).setValues([ruleHeaders]);
   sheet.getRange(currentRow, 1, 1, ruleHeaders.length).setFontWeight('bold').setBackground(CONFIG.colors.header);
+  sheet.getRange(currentRow, 10).setValue('Rule Check').setFontWeight('bold').setBackground(CONFIG.colors.header);
+  sheet.getRange(currentRow, 11).setValue('Rule Guidance').setFontWeight('bold').setBackground(CONFIG.colors.header);
   currentRow++;
 
   const ruleDataStartRow = currentRow;
@@ -4600,35 +5021,86 @@ function setupRestockSettingsTab(ss) {
     .build();
   sheet.getRange(currentRow, 3, STOCKING_RULES_DATA.length, 1).setDataValidation(prodTypeValidation);
 
+  const thresholdValidation = SpreadsheetApp.newDataValidation()
+    .requireNumberGreaterThanOrEqualTo(0)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(currentRow, 6, STOCKING_RULES_DATA.length, 3).setDataValidation(thresholdValidation);
+
   const activeRange = sheet.getRange(currentRow, 9, STOCKING_RULES_DATA.length, 1);
   activeRange.insertCheckboxes();
 
-  sheet.setColumnWidth(1, 180);
-  sheet.setColumnWidth(2, 120);
-  sheet.setColumnWidth(3, 110);
-  sheet.setColumnWidth(4, 80);
-  sheet.setColumnWidth(5, 120);
-  sheet.setColumnWidth(6, 60);
-  sheet.setColumnWidth(7, 60);
-  sheet.setColumnWidth(8, 60);
-  sheet.setColumnWidth(9, 55);
-  sheet.setColumnWidth(11, 150);
-  sheet.setColumnWidth(12, 130);
-  sheet.setColumnWidth(13, 360);
+  const ruleCheckRange = sheet.getRange(currentRow, 10, STOCKING_RULES_DATA.length, 1);
+  ruleCheckRange.setFormulaR1C1('=IF(RC1="","",IF(NOT(RC9),"INACTIVE",IF(OR(RC6="",RC7="",RC8=""),"MISSING_VALUES",IF(OR(RC6<RC7,RC7<RC8),"CHECK_THRESHOLDS","OK"))))');
+  sheet.getRange(currentRow, 11).setValue('More filled criteria = higher priority. If tie, lower Target wins.');
 
   const defaultRuleRow = currentRow + STOCKING_RULES_DATA.length - 1;
-  sheet.getRange(defaultRuleRow, 1, 1, 9).setBackground('#e8f5e9');
-  sheet.getRange(currentRow - 1, 10).setValue('Matching Info').setFontWeight('bold').setFontStyle('italic');
-  sheet.getRange(currentRow, 10).setValue('Fill in criteria. More filled = higher priority');
-  sheet.getRange(defaultRuleRow, 10).setValue('Default catches all unmatched products');
-  sheet.setColumnWidth(10, 280);
+  sheet.getRange(defaultRuleRow, 1, 1, 11).setBackground('#e8f5e9');
+  sheet.getRange(defaultRuleRow, 11).setValue('Default catches unmatched products. Preset mode auto-syncs this row.');
+
+  const ruleSectionStartRow = currentRow - 4;
+  const ruleSectionEndRow = currentRow + STOCKING_RULES_DATA.length - 1;
+  sheet.getRange(ruleSectionStartRow, 1, ruleSectionEndRow - ruleSectionStartRow + 1, 11)
+    .setBorder(true, true, true, true, false, false, CONFIG.colors.border, SpreadsheetApp.BorderStyle.SOLID);
+
+  const settingsRules = [];
+  settingsRules.push(
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo('OK')
+      .setBackground('#d9ead3')
+      .setRanges([ruleCheckRange])
+      .build()
+  );
+  settingsRules.push(
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo('INACTIVE')
+      .setBackground('#f3f3f3')
+      .setFontColor('#777777')
+      .setRanges([ruleCheckRange])
+      .build()
+  );
+  settingsRules.push(
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextContains('CHECK')
+      .setBackground('#f4cccc')
+      .setRanges([ruleCheckRange])
+      .build()
+  );
+  settingsRules.push(
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextContains('MISSING')
+      .setBackground('#fff2cc')
+      .setRanges([ruleCheckRange])
+      .build()
+  );
+  sheet.setConditionalFormatRules(settingsRules);
 
   // Row marker metadata used by formulas + dynamic named ranges.
   sheet.getRange('N1').setValue(locDataStartRow);
   sheet.getRange('N2').setValue(seededRows.length > 0 ? (locDataStartRow + seededRows.length - 1) : (locDataStartRow - 1));
   sheet.getRange('N3').setValue(ruleDataStartRow);
   sheet.getRange('N4').setValue(ruleDataStartRow + STOCKING_RULES_DATA.length - 1);
-  sheet.hideColumns(14);
+  sheet.getRange('N5').setValue(buildLocationRoleSignature_(activeProfile.profileId, seededRows));
+
+  syncStockingPolicyControls_(sheet);
+
+  sheet.setColumnWidth(1, 200);
+  sheet.setColumnWidth(2, 130);
+  sheet.setColumnWidth(3, 130);
+  sheet.setColumnWidth(4, 110);
+  sheet.setColumnWidth(5, 170);
+  sheet.setColumnWidth(6, 75);
+  sheet.setColumnWidth(7, 75);
+  sheet.setColumnWidth(8, 75);
+  sheet.setColumnWidth(9, 65);
+  sheet.setColumnWidth(10, 150);
+  sheet.setColumnWidth(11, 360);
+  sheet.setColumnWidth(12, 150);
+  sheet.setColumnWidth(13, 360);
+
+  sheet.hideColumns(14, 1); // Col N metadata
+  sheet.hideColumns(16, 6); // Col P:U preset lookup table
+  sheet.setFrozenRows(1);
 }
 // ============================================================================
 // RESTOCK ENGINE (INTERNAL) TAB
@@ -4841,10 +5313,10 @@ function setupRestockEngineTab(ss) {
   );
   
   // Recommended Pull Qty (col AM = 39) - Pull enough to reach Target, but no more than Reserve
-  // Uses Shortfall (Target - Pick Shelf Qty) to avoid over-stocking the floor
-  // Formula: MIN(Shortfall, Reserve Qty) - pull only what's needed
+  // Uses Shortfall (Target - Pick Shelf Qty) plus manager-configurable global pull cap.
+  // Formula: MIN(Shortfall, Reserve Qty, Global Pull Cap)
   sheet.getRange(2, summaryStartCol + 22).setFormula(
-    `=ARRAYFORMULA(IF(Q2:Q="","",MIN(AL2:AL,Z2:Z)))`
+    `=ARRAYFORMULA(IF(Q2:Q="","",MIN(AL2:AL,Z2:Z,MAX(1,IFERROR(VALUE('Restock Settings'!$L$4),99)))))`
   );
   
   // ==================== PULL PLANNING - DISABLED FOR MVP ====================
@@ -4906,9 +5378,7 @@ function setupRestockEngineTab(ss) {
   // Column K ($K$2:$K$5000) contains Inventory Barcodes from raw data
   // OK = all inventory rows have same barcode
   // CHECK = multiple different barcodes exist (staff should verify before pulling)
-  sheet.getRange(2, summaryStartCol + 33).setFormula(
-    `=IF(Q2="","",MAP(Q2:Q,LAMBDA(id,IF(id="","",IF(ROWS(UNIQUE(FILTER($K$2:$K$5000,($A$2:$A$5000=id)*($K$2:$K$5000<>""))))>1,"CHECK","OK")))))`
-  );
+  sheet.getRange(2, summaryStartCol + 33).setFormula(getBarcodeMatchQcFormula_());
   
   // Set column widths for eligible rows section (columns A-O)
   for (let i = 1; i <= 15; i++) {
@@ -4938,6 +5408,7 @@ function setupRestockEngineTab(ss) {
 function setupRestockChecklistTab(ss) {
   const sheet = ensureSheetByCompatName_(ss, 'Restock List');
   sheet.clear();
+  sheet.setHiddenGridlines(true);
   
   // Header area - Row 1: Title + Dates (compact layout)
   sheet.getRange('A1').setValue('VAULT RESTOCK LIST');
@@ -5072,6 +5543,7 @@ function setupRestockChecklistTab(ss) {
 function setupNoReserveRiskTab(ss) {
   const sheet = ensureSheetByCompatName_(ss, 'Backstock Alerts');
   sheet.clear();
+  sheet.setHiddenGridlines(true);
 
   sheet.getRange('A1').setValue('BACKSTOCK ALERTS').setFontSize(16).setFontWeight('bold');
   sheet.getRange('A2').setValue('Products below target with zero reserve quantity. Use this list for reorder/transfer decisions and mapping audits.');
@@ -5162,6 +5634,7 @@ function setupNoReserveRiskTab(ss) {
 function setupDataExceptionsTab(ss) {
   const sheet = ensureSheetByCompatName_(ss, 'Data Watchlist');
   sheet.clear();
+  sheet.setHiddenGridlines(true);
   
   // Header
   sheet.getRange('A1').setValue('DATA WATCHLIST');
@@ -5220,6 +5693,7 @@ function setupDataExceptionsTab(ss) {
 function setupComplianceConfigTab(ss) {
   const sheet = ss.getSheetByName(COMPLIANCE_DEFAULTS.configSheetName);
   sheet.clear();
+  sheet.setHiddenGridlines(true);
 
   sheet.getRange('A1:B1').setValues([['Setting', 'Value']]);
   sheet.getRange('A1:B1').setFontWeight('bold').setBackground(CONFIG.colors.header);
@@ -5235,16 +5709,29 @@ function setupComplianceConfigTab(ss) {
   sheet.getRange(2, 1, settings.length, 2).setValues(settings);
 
   const logicValidation = SpreadsheetApp.newDataValidation()
-    .requireValueInList(['STATUS', 'LOCATION', 'EITHER'], true)
+    .requireValueInList(COMPLIANCE_LOGIC_MODES, true)
     .setAllowInvalid(false)
     .build();
   sheet.getRange('B5').setDataValidation(logicValidation);
 
   const typeScopeValidation = SpreadsheetApp.newDataValidation()
-    .requireValueInList(['ALL', 'CANNABIS_ONLY'], true)
+    .requireValueInList(COMPLIANCE_PRODUCT_TYPE_SCOPES, true)
     .setAllowInvalid(false)
     .build();
   sheet.getRange('B7').setDataValidation(typeScopeValidation);
+
+  const rowValidation = SpreadsheetApp.newDataValidation()
+    .requireNumberGreaterThan(0)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange('B3:B4').setDataValidation(rowValidation).setNumberFormat('0');
+
+  const availableSheetNames = ss.getSheets().map(s => s.getName());
+  const rawSheetValidation = SpreadsheetApp.newDataValidation()
+    .requireValueInList(availableSheetNames, true)
+    .setAllowInvalid(true)
+    .build();
+  sheet.getRange('B2').setDataValidation(rawSheetValidation);
 
   const qtyCell = sheet.getRange('B6');
   qtyCell.insertCheckboxes();
@@ -5264,6 +5751,11 @@ function setupComplianceConfigTab(ss) {
   if (aliasRows.length > 0) {
     sheet.getRange(2, 6, aliasRows.length, 2).setValues(aliasRows);
   }
+  const canonicalFieldValidation = SpreadsheetApp.newDataValidation()
+    .requireValueInList(COMPLIANCE_DEFAULTS.canonicalFields, true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, 6, 300, 1).setDataValidation(canonicalFieldValidation);
 
   sheet.getRange('J1').setValue('processed_status_allowlist').setFontWeight('bold').setBackground(CONFIG.colors.header);
   sheet.getRange('K1').setValue('excluded_locations').setFontWeight('bold').setBackground(CONFIG.colors.header);
@@ -5279,9 +5771,36 @@ function setupComplianceConfigTab(ss) {
   sheet.getRange(2, 13, COMPLIANCE_DEFAULTS.missingTokens.length, 1)
     .setValues(COMPLIANCE_DEFAULTS.missingTokens.map(v => [v]));
 
+  const suggestionRows = 300;
+  const statusSuggestionValidation = SpreadsheetApp.newDataValidation()
+    .requireValueInList(COMPLIANCE_DEFAULTS.processedStatusAllowlist, true)
+    .setAllowInvalid(true)
+    .build();
+  sheet.getRange(2, 10, suggestionRows, 1).setDataValidation(statusSuggestionValidation);
+
+  const excludedLocationValidation = SpreadsheetApp.newDataValidation()
+    .requireValueInList(COMPLIANCE_DEFAULTS.excludedLocations, true)
+    .setAllowInvalid(true)
+    .build();
+  sheet.getRange(2, 11, suggestionRows, 1).setDataValidation(excludedLocationValidation);
+
+  const cannabisTypeValidation = SpreadsheetApp.newDataValidation()
+    .requireValueInList(COMPLIANCE_DEFAULTS.cannabisProductTypes, true)
+    .setAllowInvalid(true)
+    .build();
+  sheet.getRange(2, 12, suggestionRows, 1).setDataValidation(cannabisTypeValidation);
+
+  const missingTokenSuggestions = COMPLIANCE_DEFAULTS.missingTokens.filter(v => String(v || '').trim() !== '');
+  const missingTokenValidation = SpreadsheetApp.newDataValidation()
+    .requireValueInList(missingTokenSuggestions, true)
+    .setAllowInvalid(true)
+    .build();
+  sheet.getRange(2, 13, suggestionRows, 1).setDataValidation(missingTokenValidation);
+
   sheet.getRange('A9').setValue('Config Notes').setFontWeight('bold');
-  sheet.getRange('A10').setValue('Update values/lists here to tune compliance behavior without code changes.');
+  sheet.getRange('A10').setValue('Use dropdowns for common values. Custom entries are still allowed for list columns J:M.');
   sheet.getRange('A11').setValue('Aliases are matched by normalized header text with fuzzy fallback.');
+  sheet.getRange('A12').setValue('B3/B4 must stay positive integers (header row and data start row).');
 
   sheet.setColumnWidth(1, 190);
   sheet.setColumnWidth(2, 220);
@@ -5297,15 +5816,20 @@ function setupComplianceConfigTab(ss) {
 function setupMissingComplianceTab(ss) {
   const sheet = ensureSheetByCompatName_(ss, COMPLIANCE_DEFAULTS.outputSheetName);
   sheet.clear();
+  sheet.setHiddenGridlines(true);
 
-  sheet.getRange('A1').setValue('COMPLIANCE ALERTS').setFontSize(14).setFontWeight('bold');
-  sheet.getRange('A2').setValue('Use Restock -> Run Daily Update or Run Compliance Only to generate this report.');
-  sheet.setColumnWidth(1, 120);
+  sheet.getRange('A1').setValue('COMPLIANCE ALERTS').setFontSize(16).setFontWeight('bold');
+  sheet.getRange('A2').setValue('Run Restock -> Run Daily Update (or Run Compliance Only) to refresh this report.');
+  sheet.getRange('A3').setValue('When issues exist, this sheet opens automatically at run completion.');
+  sheet.getRange('A2:A3').setBackground(CONFIG.colors.instructionBg);
+  sheet.setColumnWidth(1, 320);
+  sheet.setFrozenRows(3);
 }
 
 function setupComplianceLogTab(ss) {
   const sheet = ensureSheetByCompatName_(ss, COMPLIANCE_DEFAULTS.logSheetName);
   sheet.clear();
+  sheet.setHiddenGridlines(true);
 
   const headers = [
     'Timestamp',
@@ -5393,6 +5917,15 @@ function applyChecklistConditionalFormatting(ss) {
     .setRanges([sheet.getRange(dataStartRow, 3, maxRows, 1)]) // Product column only
     .build();
   rules.push(strikethroughRule);
+
+  // Rule 7: Blocked rows should include a reason in Notes (column P).
+  const blockedNeedsReasonRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=AND($N3="Blocked",LEN(TRIM($P3))=0)')
+    .setBackground('#fde9d9')
+    .setFontColor('#b45f06')
+    .setRanges([sheet.getRange(dataStartRow, 16, maxRows, 1)])
+    .build();
+  rules.push(blockedNeedsReasonRule);
   
   sheet.setConditionalFormatRules(rules);
 }
@@ -6001,6 +6534,8 @@ function writeComplianceOutput_(sheet, summary, flaggedRows, warnings) {
   let rowsWritten = 0;
   sheet.clear();
   writeCalls++;
+  sheet.setHiddenGridlines(true);
+  writeCalls++;
 
   sheet.getRange('A1').setValue('Compliance Audit Summary').setFontSize(14).setFontWeight('bold');
   writeCalls++;
@@ -6041,7 +6576,11 @@ function writeComplianceOutput_(sheet, summary, flaggedRows, warnings) {
 
   sheet.getRange(headerRow, 1, 1, headers.length).setValues([headers]);
   writeCalls++;
-  sheet.getRange(headerRow, 1, 1, headers.length).setFontWeight('bold').setBackground(CONFIG.colors.header);
+  sheet.getRange(headerRow, 1, 1, headers.length)
+    .setFontWeight('bold')
+    .setBackground(CONFIG.colors.header)
+    .setBorder(true, true, true, true, true, true)
+    .setWrap(true);
   writeCalls++;
 
   if (flaggedRows.length > 0) {
@@ -6236,13 +6775,13 @@ function readComplianceConfig_(ss, warnings) {
     cfg.dataStartRow = parseIntWithFallback_(sheet.getRange('B4').getValue(), COMPLIANCE_DEFAULTS.dataStartRow);
     cfg.processedLogicMode = parseEnumWithFallback_(
       sheet.getRange('B5').getDisplayValue(),
-      ['STATUS', 'LOCATION', 'EITHER'],
+      COMPLIANCE_LOGIC_MODES,
       COMPLIANCE_DEFAULTS.processedLogicMode
     );
     cfg.requireQtyGtZero = parseBooleanWithFallback_(sheet.getRange('B6').getValue(), COMPLIANCE_DEFAULTS.requireQtyGtZero);
     cfg.productTypeScope = parseEnumWithFallback_(
       sheet.getRange('B7').getDisplayValue(),
-      ['ALL', 'CANNABIS_ONLY'],
+      COMPLIANCE_PRODUCT_TYPE_SCOPES,
       COMPLIANCE_DEFAULTS.productTypeScope
     );
 

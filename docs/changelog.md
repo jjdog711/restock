@@ -10,6 +10,11 @@ status: active
 
 ## v2.2 - 2026-03-06
 
+- Hardened the local docs path for day-to-day use:
+  - added Obsidian-first local-use guidance to the docs hub and root README
+  - clarified role-based start paths and failure routing from the homepage
+  - made the reference index current-vs-legacy split clearer
+  - fixed runbook outcome-code placeholders so failure pages show exact outcomes
 - Finalized user-facing tab names:
   - `Home`
   - `Start Here`
