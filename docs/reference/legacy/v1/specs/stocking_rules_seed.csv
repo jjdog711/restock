@@ -1,0 +1,10 @@
+Rule Name,External ID,Brand,Product Type,Subtype,Size Contains,Pack Style,Target Pick Qty,Warning Pick Qty,Critical Pick Qty,Active,Notes
+Flower – 3.5g,,,FLOWER,*,3.5 G,Any,6,4,2,TRUE,Default 3.5g flower
+Flower – 14g,,,FLOWER,*,14 G,Any,4,3,1,TRUE,Default 14g flower
+Flower – 28g,,,FLOWER,*,28 G,Any,3,2,1,TRUE,Default 28g flower
+Preroll – Single,,,PREROLL,*,,"Single",10,7,3,TRUE,Default single prerolls
+Preroll – Pack,,,PREROLL,*,,"Pack",4,3,1,TRUE,Default PR packs
+Sluggerz – PR Packs,,SLUGGERZ,PREROLL,*,,"Pack",6,4,2,TRUE,Brand-specific override for Sluggerz packs
+RYTHM – Flower 14g,,RYTHM,FLOWER,*,14 G,Any,4,3,1,TRUE,Bump 14g RYTHM flower
+Edibles – Standard,,,EDIBLE,*,100 MG,Any,4,3,1,TRUE,Example edible rule
+Default – All,,,*,*,,"Any",3,2,1,TRUE,Catch-all for unclassified items
