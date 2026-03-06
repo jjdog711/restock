@@ -957,13 +957,19 @@ function countOpenUnknownLocationQueue_(ss) {
 }
 
 function getTriggerStatus_(ss) {
-  const triggers = ScriptApp.getProjectTriggers();
-  const hasTrigger = triggers.some(t => t.getHandlerFunction() === 'handleSpreadsheetChange');
-  if (!hasTrigger) return 'NOT_INSTALLED';
+  try {
+    const triggers = ScriptApp.getProjectTriggers();
+    const hasTrigger = triggers.some(t => t.getHandlerFunction() === 'handleSpreadsheetChange');
+    if (!hasTrigger) return 'NOT_INSTALLED';
 
-  const profile = resolveActiveStoreProfile_(ss, { allowOverride: true, useRawData: true });
-  if (!profile.autoRunEnabled) return 'DISABLED_FOR_PROFILE';
-  return 'ACTIVE';
+    const profile = resolveActiveStoreProfile_(ss, { allowOverride: true, useRawData: true });
+    if (!profile.autoRunEnabled) return 'DISABLED_FOR_PROFILE';
+    return 'ACTIVE';
+  } catch (error) {
+    // Simple triggers can run in reduced auth contexts; avoid breaking onOpen/menu creation.
+    Logger.log('getTriggerStatus_ unavailable in current context: ' + error);
+    return 'UNKNOWN_NOAUTH';
+  }
 }
 
 function finalizeRunContext_(ss, runCtx, options) {
@@ -1917,19 +1923,37 @@ function refreshChecklist(options) {
  */
 function onOpen() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  ensureDailyHomeTab_(ss);
-  ensureNoReserveRiskTab_(ss);
-  ensureSystemDiagnosticsTab_(ss);
-  ensureChecklistViewConfig_(ss);
-  refreshDailyHomeHealthFromState_(ss);
-  const docProps = PropertiesService.getDocumentProperties();
-  const storedMode = parseEnumWithFallback_(
-    docProps.getProperty(SYSTEM_REFERENCE.props.uiMode) || 'STANDARD',
-    CONFIG.workspaceModes,
-    'STANDARD'
-  );
-  applyWorkspaceView_(ss, storedMode, { silent: true, persist: false });
+  const storedMode = getStoredWorkspaceModeSafe_();
+  addRestockMenu_(storedMode);
 
+  // Keep initialization best-effort so menu creation is never blocked.
+  try {
+    ensureDailyHomeTab_(ss);
+    ensureNoReserveRiskTab_(ss);
+    ensureSystemDiagnosticsTab_(ss);
+    ensureChecklistViewConfig_(ss);
+    refreshDailyHomeHealthFromState_(ss);
+    applyWorkspaceView_(ss, storedMode, { silent: true, persist: false });
+  } catch (error) {
+    Logger.log('onOpen post-menu setup warning: ' + error);
+  }
+}
+
+function getStoredWorkspaceModeSafe_() {
+  try {
+    const docProps = PropertiesService.getDocumentProperties();
+    return parseEnumWithFallback_(
+      docProps.getProperty(SYSTEM_REFERENCE.props.uiMode) || 'STANDARD',
+      CONFIG.workspaceModes,
+      'STANDARD'
+    );
+  } catch (error) {
+    Logger.log('Workspace mode unavailable in current context: ' + error);
+    return 'STANDARD';
+  }
+}
+
+function addRestockMenu_(storedMode) {
   const ui = SpreadsheetApp.getUi();
   const checklistViewMenu = ui.createMenu('Checklist View')
     .addItem('Priority Order', 'setChecklistViewPriority')
@@ -1964,6 +1988,17 @@ function onOpen() {
   }
 
   menu.addToUi();
+}
+
+function repairRestockMenu() {
+  onOpen();
+  SpreadsheetApp.getUi().alert(
+    'Restock menu refresh attempted.\n\n' +
+    'If it is still missing:\n' +
+    '1. Reload the spreadsheet tab.\n' +
+    '2. In Apps Script, run main() once and approve permissions.\n' +
+    '3. Reload the spreadsheet again.'
+  );
 }
 
 function setStandardUserView() {
