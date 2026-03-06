@@ -2,7 +2,7 @@
 audience: manager,admin
 owner: State of Mind Management + Xylent Studios
 last-reviewed: 2026-03-06
-script-version: v2.1
+script-version: v2.2
 status: active
 ---
 
@@ -21,4 +21,5 @@ Use these by matching the latest `Run_Journal.outcome` value.
 For live context, open `Restock -> Open Diagnostics`.
 
 ---
-_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.1 | Last reviewed: 2026-03-06_
+_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.2 | Last reviewed: 2026-03-06_
+

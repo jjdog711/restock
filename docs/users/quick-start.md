@@ -2,7 +2,7 @@
 audience: staff
 owner: State of Mind Operations + Xylent Studios
 last-reviewed: 2026-03-06
-script-version: v2.1
+script-version: v2.2
 status: active
 ---
 
@@ -26,30 +26,39 @@ Daily workflow stays simple.
 
 - Menu: `Restock -> Run Daily Update`
 - Wait for completion popup
-- If auto-run is installed, still verify the run summary on `Daily Home`
+- If auto-run is installed, still verify the run summary on `Home`
+- Routing behavior:
+  - Opens `Compliance Alerts` when compliance issues are found
+  - Opens `Restock List` when there are no compliance issues
 
-## 4. Review risk first
+## 4. Review compliance if routed there
 
-- Open `No_Reserve_Risk`
+- If `Compliance Alerts` opened, resolve flagged rows first
+
+## 5. Review risk
+
+- Open `Backstock Alerts`
 - Handle `1 - Critical` rows first
 
-## 5. Work the checklist
+## 6. Work the restock list
 
-- Open `Restock Checklist`
+- Open `Restock List`
 - Follow `First Pull From` then `Then Pull From`
 - Enter pulled units in `Pull` and mark `Done`
 
-## 6. Resolve compliance issues
+## 7. Confirm compliance completion
 
-- Open `Missing_Compliance`
+- Open `Compliance Alerts`
 - Work rows flagged `MISSING_THC`, `MISSING_EXP`, or `MISSING_BOTH`
 
 ## If the checklist is empty
 
 1. Confirm CSV import started at `A6`
 2. Re-run `Restock -> Run Daily Update`
-3. Tell a manager to check `System_Reference -> LocationReviewQueue`
-4. Tell a manager to run `Restock -> Run System Check`
+3. Escalate to manager using [Manager Start Here](../managers/start-here.md)
+4. Manager should run `Restock -> Run System Check`
 
 ---
-_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.1 | Last reviewed: 2026-03-06_
+_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.2 | Last reviewed: 2026-03-06_
+
+

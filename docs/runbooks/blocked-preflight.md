@@ -2,7 +2,7 @@
 audience: manager,admin
 owner: State of Mind Management + Xylent Studios
 last-reviewed: 2026-03-06
-script-version: v2.1
+script-version: v2.2
 status: active
 ---
 
@@ -16,7 +16,7 @@ Preflight detected profile/location coverage collapse or reserve path failure.
 
 ## Immediate Actions
 
-- Check active profile on Daily Home.
+- Check active profile on Home.
 - Review System_Reference -> LocationProfileMap for missing reserve mappings.
 - Review LocationReviewQueue for newly discovered locations.
 - Update map, then rerun Run Daily Update.
@@ -30,7 +30,9 @@ Provide to developer:
 - profile ID
 - import signature
 - fixture/file used
-- screenshots of Daily Home + Diagnostics rows
+- screenshots of Home + Diagnostics rows
 
 ---
-_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.1 | Last reviewed: 2026-03-06_
+_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.2 | Last reviewed: 2026-03-06_
+
+

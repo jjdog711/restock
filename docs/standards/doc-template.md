@@ -2,7 +2,7 @@
 audience: all
 owner: Xylent Studios
 last-reviewed: 2026-03-06
-script-version: v2.1
+script-version: v2.2
 status: active
 ---
 
@@ -13,7 +13,7 @@ status: active
 audience: <staff|manager|admin|developer|ai-agent|all>
 owner: <team or individual>
 last-reviewed: YYYY-MM-DD
-script-version: v2.1
+script-version: v2.2
 status: <active|alias|historical>
 ---
 
@@ -32,7 +32,7 @@ Use concise sections and explicit operational wording.
 List canonical links only.
 
 ---
-_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.1 | Last reviewed: YYYY-MM-DD_
+_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.2 | Last reviewed: YYYY-MM-DD_
 ```
 
 Notes:
@@ -41,4 +41,5 @@ Notes:
 - Historical docs should include a deprecation banner below title.
 
 ---
-_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.1 | Last reviewed: 2026-03-06_
+_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.2 | Last reviewed: 2026-03-06_
+

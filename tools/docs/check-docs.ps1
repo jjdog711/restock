@@ -78,7 +78,13 @@ $stalePatterns = @(
   @{ regex = '\bRefresh Checklist\b'; label = 'Stale menu phrase: Refresh Checklist' },
   @{ regex = '\bscoped to one store\b'; label = 'Stale single-store claim: scoped to one store' },
   @{ regex = '\bsingle-store\b'; label = 'Stale single-store claim: single-store' },
-  @{ regex = 'one store \(State of Mind\)'; label = 'Stale single-store claim: one store (State of Mind)' }
+  @{ regex = 'one store \(State of Mind\)'; label = 'Stale single-store claim: one store (State of Mind)' },
+  @{ regex = '\bDaily Home\b'; label = 'Stale tab name: Daily Home' },
+  @{ regex = '\bRestock Checklist\b'; label = 'Stale tab name: Restock Checklist' },
+  @{ regex = '\bNo_Reserve_Risk\b'; label = 'Stale tab name: No_Reserve_Risk' },
+  @{ regex = '\bMissing_Compliance\b'; label = 'Stale tab name: Missing_Compliance' },
+  @{ regex = '\bCompliance Log\b'; label = 'Stale tab name: Compliance Log' },
+  @{ regex = '\bData Exceptions\b'; label = 'Stale tab name: Data Exceptions' }
 )
 
 foreach ($doc in $activeDocs) {
@@ -98,14 +104,30 @@ $aliasMap = @{
   'docs\apps_script_deployment_guide.md' = 'docs/admins/deployment-guide.md'
   'docs\STOCKING_RULES_TEST_GUIDE.md' = 'docs/developers/stocking-rules-test-guide.md'
   'docs\future_features_backlog.md' = 'docs/product/future-features-backlog.md'
-  'docs\CHANGELOG.md' = 'docs/changelog.md'
   'docs\reference\README.md' = 'docs/reference/index.md'
+}
+
+$canonicalChangelog = Join-Path $docsRoot 'changelog.md'
+if (-not (Test-Path -LiteralPath $canonicalChangelog)) {
+  Add-Error("Canonical changelog missing: docs/changelog.md")
+} else {
+  $actualName = (Get-Item -LiteralPath $canonicalChangelog).Name
+  if ($actualName -cne 'changelog.md') {
+    Add-Error("Canonical changelog casing mismatch. Expected docs/changelog.md, found docs/$actualName")
+  }
 }
 
 foreach ($oldPath in $aliasMap.Keys) {
   $oldAbs = Join-Path $RepoRoot $oldPath
   $newRel = $aliasMap[$oldPath]
   $newAbs = Join-Path $RepoRoot $newRel.Replace('/', [System.IO.Path]::DirectorySeparatorChar)
+  $oldFull = [System.IO.Path]::GetFullPath($oldAbs)
+  $newFull = [System.IO.Path]::GetFullPath($newAbs)
+
+  if ($oldFull -ieq $newFull) {
+    Add-Error("Alias self-link detected: $oldPath -> $newRel")
+    continue
+  }
 
   if (-not (Test-Path -LiteralPath $oldAbs)) {
     Add-Error("Missing alias file: $oldPath")
@@ -126,7 +148,11 @@ foreach ($oldPath in $aliasMap.Keys) {
     if ([string]::IsNullOrWhiteSpace($targetPath)) { continue }
 
     $resolved = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $oldAbs) $targetPath))
-    if ($resolved -eq [System.IO.Path]::GetFullPath($newAbs)) {
+    if ($resolved -ieq $oldFull) {
+      Add-Error("Alias self-link in file content: $oldPath -> $target")
+      continue
+    }
+    if ($resolved -ieq $newFull) {
       $pointsToTarget = $true
       break
     }

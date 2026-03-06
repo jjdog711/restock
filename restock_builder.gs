@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ============================================================================
  * STATE OF MIND - VAULT RESTOCK SYSTEM BUILDER
  * ============================================================================
@@ -11,18 +11,26 @@
  * 2. Import your Treez Inventory Valuation CSV starting at cell A6
  * 3. Run "Restock -> Run Daily Update" to refresh checklist and compliance output
  * 
- * Version: 1.7 PORTRAIT PRINT LAYOUT
- * Last Updated: 2025-12-18
+ * Version: 2.2 SHIP READINESS
+ * Last Updated: 2026-03-06
+ * 
+ * v2.2 CHANGES (March 6, 2026):
+ * - Finalized user-facing tab naming model:
+ *   Home, Start Here, Restock List, Backstock Alerts, Compliance Alerts, Compliance History, Data Watchlist
+ * - Added post-run routing behavior:
+ *   open Compliance Alerts when issues exist, otherwise open Restock List
+ * - Hardened profile/location/performance diagnostics flow for Albany + Latham operations
+ * - Cleaned user-facing copy and fixed encoding artifacts
  * 
  * v1.7 CHANGES (December 18, 2025):
- * - Renamed checklist columns for compact display: Pick Shelf Qty→Flr, Reserve Qty→Bck, Units Pulled→Pull, Barcode Match→BC Match
+ * - Renamed checklist columns for compact display: Pick Shelf Qty -> Flr, Reserve Qty -> Bck, Units Pulled -> Pull, Barcode Match -> BC Match
  * - Optimized column widths for portrait printing
  * - Hidden Oldest Backstock Date column by default
  * 
  * v1.6 CHANGES (December 18, 2025):
  * - Updated treezColumns array for new Treez export format (NY METRC)
  * - New columns added: Harvest Batch, Production Batch #, Cbga Lab Result, Delta-9 Thc Lab Result
- * - Column names changed: Ext Batch ID → State Tracking ID, Treez Batch → Batch
+ * - Column names changed: Ext Batch ID -> State Tracking ID, Treez Batch -> Batch
  * - Updated treezColIndex: inventoryBarcodes=35, size=44, externalId=46, inventoryType=47
  * - Fixed all formula column references (AT, AU, AR, AI)
  * 
@@ -38,10 +46,10 @@
  * - Only show products with Reserve > 0 (must have backstock to pull)
  * - First Pull From: Shows actual reserve location + qty
  * - Then Pull From: Shows second reserve location (if exists)
- * - Barcode Match QC: Checks for multiple barcodes (OK ✓ / Check ⚠)
+ * - Barcode Match QC: Checks for multiple barcodes (OK / CHECK)
  * - Oldest Reserve Date: FIFO guidance
  * - Urgency coloring (Critical/Soon/Low)
- * - Target displays as ∞ (no specific target set)
+ * - Target displays as unlimited (no specific target set)
  * 
  * STILL DISABLED (for future versions):
  * - Rule matching (using hardcoded defaults)
@@ -62,19 +70,20 @@
 const CONFIG = {
   // Tab names in display order
   tabs: [
-    'Daily Home',
-    'Instructions',
+    'Home',
+    'Start Here',
     'Treez Valuation (Raw)',
     'Restock Settings',
     'Restock Engine (Internal)',
-    'Restock Checklist',
-    'No_Reserve_Risk',
-    'Data Exceptions',
+    'Restock List',
+    'Backstock Alerts',
+    'Data Watchlist',
     'System_Reference',
     'System_Diagnostics',
+    'AI_Diagnostics',
     'Compliance Config',
-    'Missing_Compliance',
-    'Compliance Log'
+    'Compliance Alerts',
+    'Compliance History'
   ],
   
   // Colors
@@ -122,6 +131,7 @@ const CONFIG = {
     dateValuation: 1,
     timeValuation: 2,
     dateReceived: 3,
+    receivingLicense: 9,
     productType: 10,
     subtype: 11,
     brand: 12,
@@ -164,6 +174,81 @@ const CONFIG = {
   // Workspace visibility modes
   workspaceModes: ['STANDARD', 'MANAGER']
 };
+
+const TAB_NAME_UPDATES = {
+  'Daily Home': 'Home',
+  'Instructions': 'Start Here',
+  'Restock Checklist': 'Restock List',
+  'No_Reserve_Risk': 'Backstock Alerts',
+  'Data Exceptions': 'Data Watchlist',
+  'Missing_Compliance': 'Compliance Alerts',
+  'Compliance Log': 'Compliance History'
+};
+
+const TAB_NAME_LEGACY = {
+  'Home': ['Daily Home'],
+  'Start Here': ['Instructions'],
+  'Restock List': ['Restock Checklist'],
+  'Backstock Alerts': ['No_Reserve_Risk'],
+  'Data Watchlist': ['Data Exceptions'],
+  'Compliance Alerts': ['Missing_Compliance'],
+  'Compliance History': ['Compliance Log']
+};
+
+function preferredTabName_(name) {
+  return TAB_NAME_UPDATES[String(name || '').trim()] || String(name || '').trim();
+}
+
+function getSheetByCompatName_(ss, name) {
+  const preferred = preferredTabName_(name);
+  let sheet = ss.getSheetByName(preferred);
+  if (sheet) return sheet;
+
+  const legacy = TAB_NAME_LEGACY[preferred] || [];
+  for (let i = 0; i < legacy.length; i++) {
+    sheet = ss.getSheetByName(legacy[i]);
+    if (sheet) return sheet;
+  }
+  if (preferred !== name) {
+    return ss.getSheetByName(name);
+  }
+  return null;
+}
+
+function ensureSheetByCompatName_(ss, name, insertIndex) {
+  const preferred = preferredTabName_(name);
+  const existingPreferred = ss.getSheetByName(preferred);
+  if (existingPreferred) return existingPreferred;
+
+  const legacy = TAB_NAME_LEGACY[preferred] || [];
+  for (let i = 0; i < legacy.length; i++) {
+    const sheet = ss.getSheetByName(legacy[i]);
+    if (!sheet) continue;
+    if (!ss.getSheetByName(preferred)) {
+      sheet.setName(preferred);
+      return sheet;
+    }
+    return sheet;
+  }
+
+  if (typeof insertIndex === 'number') {
+    return ss.insertSheet(preferred, insertIndex);
+  }
+  return ss.insertSheet(preferred);
+}
+
+function migrateLegacyTabNames_(ss) {
+  const legacyKeys = Object.keys(TAB_NAME_UPDATES);
+  for (let i = 0; i < legacyKeys.length; i++) {
+    const legacy = legacyKeys[i];
+    const preferred = TAB_NAME_UPDATES[legacy];
+    const preferredSheet = ss.getSheetByName(preferred);
+    const legacySheet = ss.getSheetByName(legacy);
+    if (!preferredSheet && legacySheet) {
+      legacySheet.setName(preferred);
+    }
+  }
+}
 
 const CHECKLIST_SCHEMA_CONTRACT = [
   { key: 'date_received', index: 3, aliases: ['Date Inventory Received', 'Date Received'] },
@@ -285,7 +370,7 @@ const STOCKING_RULES_DATA = [
   ['', '', '', '', '', '', '', '', false],
   ['', '', '', '', '', '', '', '', false],
   // DEFAULT RULE: Catch-all for anything not matched above
-  ['Default – All Products', '', '', '', '', 7, 4, 2, true]
+  ['Default - All Products', '', '', '', '', 7, 4, 2, true]
 ];
 
 // ============================================================================
@@ -294,8 +379,8 @@ const STOCKING_RULES_DATA = [
 
 const COMPLIANCE_DEFAULTS = {
   configSheetName: 'Compliance Config',
-  outputSheetName: 'Missing_Compliance',
-  logSheetName: 'Compliance Log',
+  outputSheetName: 'Compliance Alerts',
+  logSheetName: 'Compliance History',
   rawSheetName: 'Treez Valuation (Raw)',
   headerRow: 6,
   dataStartRow: 7,
@@ -402,7 +487,11 @@ const SYSTEM_REFERENCE = {
     lastImportRunTs: 'RESTOCK_LAST_IMPORT_RUN_TS',
     activeProfile: 'RESTOCK_ACTIVE_PROFILE',
     complianceHighlightRows: 'RESTOCK_COMPLIANCE_HIGHLIGHT_ROWS',
+    complianceHighlightHash: 'RESTOCK_COMPLIANCE_HIGHLIGHT_HASH',
+    complianceSnapshotHash: 'RESTOCK_COMPLIANCE_SNAPSHOT_HASH',
     lastChecklistRows: 'RESTOCK_LAST_CHECKLIST_ROWS',
+    lastChecklistRawSignature: 'RESTOCK_LAST_CHECKLIST_RAW_SIGNATURE',
+    lastChecklistRulesSignature: 'RESTOCK_LAST_CHECKLIST_RULES_SIGNATURE',
     uiMode: 'RESTOCK_UI_MODE',
     runInProgress: 'RESTOCK_RUN_IN_PROGRESS',
     lastSuccessSignature: 'RESTOCK_LAST_SUCCESS_SIGNATURE',
@@ -456,7 +545,87 @@ const DIAGNOSTICS = {
     ALBANY: 25000,
     LATHAM: 60000,
     DEFAULT: 45000
-  }
+  },
+  maxDetailLength: 45000,
+  progressRowInterval: 2500,
+  progressMinIntervalMs: 4000,
+  progressMaxEvents: 12
+};
+
+const AI_DIAGNOSTICS = {
+  sheetName: 'AI_Diagnostics',
+  runRetention: 30,
+  runSummaryStartCol: 1,   // A
+  stageStepsStartCol: 30,  // AD
+  queueHealthStartCol: 50, // AX
+  hotspotsStartCol: 62,    // BJ
+  perfPacketCell: 'BJ24',
+  runSummaryHeaders: [
+    'run_id',
+    'started_at',
+    'ended_at',
+    'duration_ms',
+    'source',
+    'profile_id',
+    'signature',
+    'outcome',
+    'error_code',
+    'warning_count',
+    'perf_warn',
+    'checklist_rows',
+    'no_reserve_rows',
+    'compliance_flagged',
+    'true_unmapped_count',
+    'mapped_ignore_count',
+    'resolved_closed_count',
+    'stage_profile_resolve_ms',
+    'stage_schema_gate_ms',
+    'stage_location_sync_ms',
+    'stage_preflight_ms',
+    'stage_checklist_ms',
+    'stage_compliance_ms',
+    'stage_finalize_ms',
+    'stage_other_ms'
+  ],
+  stageStepHeaders: [
+    'run_id',
+    'profile_id',
+    'source',
+    'stage',
+    'step',
+    'duration_ms',
+    'stage_duration_ms',
+    'unaccounted_ms',
+    'api_reads',
+    'api_writes',
+    'rows_total',
+    'rows_changed',
+    'strategy',
+    'segment_count',
+    'span_width',
+    'counter_a',
+    'counter_b',
+    'detail_json',
+    'logged_at'
+  ],
+  queueHealthHeaders: [
+    'run_id',
+    'profile_id',
+    'source',
+    'true_unmapped_count',
+    'mapped_ignore_count',
+    'resolved_closed_count',
+    'open_queue_count',
+    'unknown_locations_csv',
+    'logged_at'
+  ],
+  hotspotsHeaders: [
+    'stage',
+    'step',
+    'avg_duration_ms',
+    'max_duration_ms',
+    'samples'
+  ]
 };
 
 const PROFILE_LOCATION_SEEDS = {
@@ -473,7 +642,11 @@ const PROFILE_LOCATION_SEEDS = {
     ['TOP', 'RESERVE', true, 'Albany reserve top shelf'],
     ['BIN RECEIVING', 'IGNORE', false, 'Albany receiving staging'],
     ['SAMPLES', 'IGNORE', false, 'Albany sample inventory'],
-    ['POS RETURN', 'IGNORE', false, 'Albany returns area']
+    ['POS RETURN', 'IGNORE', false, 'Albany returns area'],
+    ['QUARANTINE', 'IGNORE', false, 'Albany quarantine hold'],
+    ['UNSELLABLE INVENTORY', 'IGNORE', false, 'Albany unsellable inventory'],
+    ['DISPLAYS', 'IGNORE', false, 'Albany display-only inventory'],
+    ['DAMAGED PRODUCTS', 'IGNORE', false, 'Albany damaged inventory']
   ],
   LATHAM_EXTRA: [
     ['BACK BIN 4', 'RESERVE', true, 'Latham reserve bin'],
@@ -482,6 +655,10 @@ const PROFILE_LOCATION_SEEDS = {
     ['PROCESSED - PUT AWAY', 'RESERVE', true, 'Latham processed staging treated as reserve'],
     ['BIN RECEIVING', 'IGNORE', false, 'Latham receiving staging'],
     ['SAMPLES', 'IGNORE', false, 'Latham sample inventory'],
+    ['POS RETURN', 'IGNORE', false, 'Latham returns area'],
+    ['QUARANTINE', 'IGNORE', false, 'Latham quarantine hold'],
+    ['UNSELLABLE INVENTORY', 'IGNORE', false, 'Latham unsellable inventory'],
+    ['DISPLAYS', 'IGNORE', false, 'Latham display-only inventory'],
     ['ON HOLD', 'IGNORE', false, 'Latham held inventory'],
     ['DAMAGED PRODUCTS', 'IGNORE', false, 'Latham damaged inventory'],
     ['PROCESSING RACK', 'IGNORE', false, 'Latham processing rack'],
@@ -508,10 +685,10 @@ function main() {
   createAllTabs(ss);
   
   // Step 2: Setup each tab
-  Logger.log('Setting up Daily Home tab...');
+  Logger.log('Setting up Home tab...');
   setupDailyHomeTab(ss);
 
-  Logger.log('Setting up Instructions tab...');
+  Logger.log('Setting up Start Here tab...');
   setupInstructionsTab(ss);
   
   Logger.log('Setting up Treez Valuation tab...');
@@ -522,6 +699,9 @@ function main() {
 
   Logger.log('Setting up System Diagnostics tab...');
   setupSystemDiagnosticsTab(ss);
+
+  Logger.log('Setting up AI Diagnostics tab...');
+  setupAIDiagnosticsTab(ss);
   
   Logger.log('Setting up Restock Settings tab...');
   setupRestockSettingsTab(ss);
@@ -533,22 +713,22 @@ function main() {
   Logger.log('Setting up Restock Engine tab...');
   setupRestockEngineTab(ss);
   
-  Logger.log('Setting up Restock Checklist tab...');
+  Logger.log('Setting up Restock List tab...');
   setupRestockChecklistTab(ss);
 
-  Logger.log('Setting up No Reserve Risk tab...');
+  Logger.log('Setting up Backstock Alerts tab...');
   setupNoReserveRiskTab(ss);
   
-  Logger.log('Setting up Data Exceptions tab...');
+  Logger.log('Setting up Data Watchlist tab...');
   setupDataExceptionsTab(ss);
   
   Logger.log('Setting up Compliance Config tab...');
   setupComplianceConfigTab(ss);
   
-  Logger.log('Setting up Missing Compliance tab...');
+  Logger.log('Setting up Compliance Alerts tab...');
   setupMissingComplianceTab(ss);
   
-  Logger.log('Setting up Compliance Log tab...');
+  Logger.log('Setting up Compliance History tab...');
   setupComplianceLogTab(ss);
   
   // Step 3: Apply formatting
@@ -566,13 +746,13 @@ function main() {
   // Step 6: Apply simplified default workspace view for staff users.
   applyWorkspaceView_(ss, 'STANDARD', { silent: true, persist: true });
   refreshDailyHomeHealthFromState_(ss);
-  const homeSheet = ss.getSheetByName('Daily Home');
+  const homeSheet = getSheetByCompatName_(ss, 'Home');
   if (homeSheet) {
     ss.setActiveSheet(homeSheet);
   }
   
   Logger.log('Vault Restock System build complete!');
-  SpreadsheetApp.getUi().alert('Vault Restock System built successfully!\n\nNext steps:\n1. Go to "Treez Valuation (Raw)" tab\n2. Import your Treez CSV starting at cell A6\n3. Run "Run Daily Update" from the Restock menu\n4. (Optional) Run "Install Auto-Run" once for import automation\n5. Review "Restock Checklist", "No_Reserve_Risk", and "Missing_Compliance"');
+  SpreadsheetApp.getUi().alert('Vault Restock System built successfully!\n\nNext steps:\n1. Go to "Treez Valuation (Raw)" tab\n2. Import your Treez CSV starting at cell A6\n3. Run "Run Daily Update" from the Restock menu\n4. (Optional) Run "Install Auto-Run" once for import automation\n5. Review "Restock List", "Backstock Alerts", and "Compliance Alerts"');
 }
 
 // ============================================================================
@@ -728,6 +908,15 @@ function applyStockingRules() {
   Logger.log('Stocking rules applied to ' + productCount + ' products');
 }
 
+function computeStockingRulesSignature_(settingsSheet) {
+  if (!settingsSheet) return '';
+  const rulesStartRow = parseInt(settingsSheet.getRange('N3').getValue(), 10) || 63;
+  const rulesEndRow = parseInt(settingsSheet.getRange('N4').getValue(), 10) || (rulesStartRow + STOCKING_RULES_DATA.length - 1);
+  const rulesRowCount = Math.max(1, rulesEndRow - rulesStartRow + 1);
+  const values = settingsSheet.getRange(rulesStartRow, 1, rulesRowCount, 9).getDisplayValues();
+  return computeTextHash_(safeJson_(values));
+}
+
 function runDailyUpdate() {
   return runDailyUpdate_({
     includeChecklist: true,
@@ -748,6 +937,7 @@ function runChecklistOnly() {
 
 function runComplianceOnly() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  migrateLegacyTabNames_(ss);
   ensureSystemDiagnosticsTab_(ss);
   const schemaGate = validateRunSchemaGate_(ss, {
     includeChecklist: false,
@@ -764,10 +954,19 @@ function runComplianceOnly() {
     return { ok: false, reason: RUN_OUTCOMES.blockedSchema, schemaGate: schemaGate };
   }
 
-  const profile = resolveActiveStoreProfile_(ss, { allowOverride: true, useRawData: true });
+  const signature = computeRawImportSignature_(ss);
+  const profile = resolveActiveStoreProfile_(ss, {
+    allowOverride: true,
+    useRawData: true,
+    signature: signature
+  });
   props.setProperty(SYSTEM_REFERENCE.props.activeProfile, profile.profileId);
   syncLocationRolesForProfile_(ss, profile.profileId, { source: 'runComplianceOnly' });
   const result = runComplianceCheck({ silent: false, source: 'menu_compliance' });
+  const complianceSheet = getSheetByCompatName_(ss, COMPLIANCE_DEFAULTS.outputSheetName);
+  if (complianceSheet) {
+    ss.setActiveSheet(complianceSheet);
+  }
   refreshDailyHomeHealthFromState_(ss);
   return result;
 }
@@ -825,9 +1024,10 @@ function ensureChecklistViewConfig_(ss) {
 }
 
 function ensureNoReserveRiskTab_(ss) {
-  if (ss.getSheetByName('No_Reserve_Risk')) return;
-  const newSheet = ss.insertSheet('No_Reserve_Risk');
-  const checklistSheet = ss.getSheetByName('Restock Checklist');
+  const existing = getSheetByCompatName_(ss, 'Backstock Alerts');
+  if (existing) return;
+  const newSheet = ensureSheetByCompatName_(ss, 'Backstock Alerts');
+  const checklistSheet = getSheetByCompatName_(ss, 'Restock List');
   if (checklistSheet) {
     ss.setActiveSheet(newSheet);
     ss.moveActiveSheet(checklistSheet.getIndex() + 1);
@@ -841,9 +1041,16 @@ function ensureSystemDiagnosticsTab_(ss) {
   setupSystemDiagnosticsTab(ss);
 }
 
+function ensureAIDiagnosticsTab_(ss) {
+  if (ss.getSheetByName(AI_DIAGNOSTICS.sheetName)) return;
+  ss.insertSheet(AI_DIAGNOSTICS.sheetName);
+  setupAIDiagnosticsTab(ss);
+}
+
 function ensureDailyHomeTab_(ss) {
-  if (ss.getSheetByName('Daily Home')) return;
-  const sheet = ss.insertSheet('Daily Home');
+  const existing = getSheetByCompatName_(ss, 'Home');
+  if (existing) return;
+  const sheet = ensureSheetByCompatName_(ss, 'Home');
   ss.setActiveSheet(sheet);
   ss.moveActiveSheet(1);
   setupDailyHomeTab(ss);
@@ -874,16 +1081,130 @@ function createRunContext_(options) {
     checklistRows: 0,
     noReserveRows: 0,
     complianceFlagged: 0,
-    stageDurations: {}
+    stageDurations: {},
+    stageStepDurations: {},
+    stageCounters: {},
+    queueHealth: {
+      trueUnmappedCount: 0,
+      mappedIgnoreCount: 0,
+      resolvedClosedCount: 0,
+      openQueueCount: 0,
+      unknownLocationsCsv: ''
+    },
+    perfWarn: false
   };
 }
 
-function runWithStageTiming_(runCtx, stageName, fn) {
+function ensureStageMetrics_(runCtx, stageName) {
+  if (!runCtx || !stageName) return;
+  if (!runCtx.stageStepDurations[stageName]) {
+    runCtx.stageStepDurations[stageName] = {};
+  }
+  if (!runCtx.stageCounters[stageName]) {
+    runCtx.stageCounters[stageName] = {};
+  }
+}
+
+function captureStageStepDurations_(runCtx, stageName, stepDurations) {
+  if (!runCtx || !stageName || !stepDurations) return;
+  ensureStageMetrics_(runCtx, stageName);
+  const keys = Object.keys(stepDurations);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    const value = parseInt(stepDurations[key], 10);
+    runCtx.stageStepDurations[stageName][key] = isNaN(value) ? 0 : Math.max(0, value);
+  }
+}
+
+function mergeStageCounters_(runCtx, stageName, counters) {
+  if (!runCtx || !stageName || !counters) return;
+  ensureStageMetrics_(runCtx, stageName);
+  const keys = Object.keys(counters);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    runCtx.stageCounters[stageName][key] = counters[key];
+  }
+}
+
+function attachStageDiagnostics_(runCtx, stageName, payload) {
+  if (!runCtx || !stageName || !payload) return;
+
+  if (payload.stepDurationsMs) {
+    captureStageStepDurations_(runCtx, stageName, payload.stepDurationsMs);
+  }
+  if (payload.metrics) {
+    mergeStageCounters_(runCtx, stageName, payload.metrics);
+  }
+  if (payload.counters) {
+    mergeStageCounters_(runCtx, stageName, payload.counters);
+  }
+  if (payload.diagnostics) {
+    if (payload.diagnostics.stepDurationsMs) {
+      captureStageStepDurations_(runCtx, stageName, payload.diagnostics.stepDurationsMs);
+    }
+    if (payload.diagnostics.metrics) {
+      mergeStageCounters_(runCtx, stageName, payload.diagnostics.metrics);
+    }
+  }
+}
+
+function getStageOtherDurationMs_(runCtx) {
+  if (!runCtx || !runCtx.stageDurations) return 0;
+  const knownStages = {
+    profile_resolve: true,
+    schema_gate: true,
+    location_sync: true,
+    preflight: true,
+    checklist: true,
+    compliance: true,
+    finalize: true
+  };
+  let total = 0;
+  const stageKeys = Object.keys(runCtx.stageDurations);
+  for (let i = 0; i < stageKeys.length; i++) {
+    const stage = stageKeys[i];
+    if (knownStages[stage]) continue;
+    total += parseInt(runCtx.stageDurations[stage], 10) || 0;
+  }
+  return total;
+}
+
+function runWithStageTiming_(runCtx, stageName, fn, options) {
+  const opts = options || {};
+  const ss = opts.ss || null;
+  if (ss && opts.logStart === true) {
+    logRunStageEvent_(ss, runCtx, 'RUN_STAGE_START', 'INFO', stageName, opts.startDetails || {});
+  }
   const start = Date.now();
   try {
-    return fn();
+    const result = fn();
+    const durationMs = Date.now() - start;
+    runCtx.stageDurations[stageName] = durationMs;
+    attachStageDiagnostics_(runCtx, stageName, result);
+    if (ss && opts.logEnd === true) {
+      const endDetails = typeof opts.buildEndDetails === 'function'
+        ? (opts.buildEndDetails(result, durationMs) || {})
+        : (opts.endDetails || {});
+      if (typeof endDetails === 'object' && endDetails !== null && !Array.isArray(endDetails)) {
+        endDetails.duration_ms = durationMs;
+      }
+      logRunStageEvent_(ss, runCtx, 'RUN_STAGE_END', 'INFO', stageName, endDetails);
+    }
+    return result;
+  } catch (error) {
+    const durationMs = Date.now() - start;
+    runCtx.stageDurations[stageName] = durationMs;
+    if (ss && opts.logFailure !== false) {
+      logRunStageEvent_(ss, runCtx, 'RUN_STAGE_FAIL', 'ERROR', stageName, {
+        duration_ms: durationMs,
+        error: String(error)
+      });
+    }
+    throw error;
   } finally {
-    runCtx.stageDurations[stageName] = Date.now() - start;
+    if (!runCtx.stageDurations.hasOwnProperty(stageName)) {
+      runCtx.stageDurations[stageName] = Date.now() - start;
+    }
   }
 }
 
@@ -924,6 +1245,108 @@ function appendRunJournal_(ss, runCtx) {
   ]);
 }
 
+function stringifyDiagnosticValue_(value) {
+  if (value === null || typeof value === 'undefined') return '';
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+  }
+  if (Array.isArray(value)) {
+    return value.map(v => stringifyDiagnosticValue_(v)).filter(v => v !== '').join(',');
+  }
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value);
+    } catch (error) {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+function truncateDiagnosticDetail_(detail) {
+  const maxLen = DIAGNOSTICS.maxDetailLength || 45000;
+  const text = String(detail || '');
+  if (text.length <= maxLen) return text;
+  const suffix = ' ...[truncated]';
+  return text.slice(0, Math.max(0, maxLen - suffix.length)) + suffix;
+}
+
+function formatDiagnosticDetail_(detail) {
+  if (detail === null || typeof detail === 'undefined') return '';
+  if (typeof detail === 'string') {
+    return truncateDiagnosticDetail_(detail.replace(/\s+/g, ' ').trim());
+  }
+
+  const parts = [];
+  const keys = Object.keys(detail);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    const value = stringifyDiagnosticValue_(detail[key]);
+    if (value === '') continue;
+    const cleanValue = value.replace(/\s+/g, ' ').trim();
+    if (cleanValue === '') continue;
+    parts.push(key + '=' + cleanValue);
+  }
+  return truncateDiagnosticDetail_(parts.join('; '));
+}
+
+function logRunStageEvent_(ss, runCtx, eventType, severity, stageName, detail) {
+  const payload = {
+    run_id: runCtx && runCtx.runId ? runCtx.runId : '',
+    source: runCtx && runCtx.source ? runCtx.source : '',
+    stage: stageName || ''
+  };
+  if (runCtx && runCtx.signature) {
+    payload.signature = runCtx.signature;
+  }
+  if (detail !== null && typeof detail !== 'undefined') {
+    if (typeof detail === 'string') {
+      payload.detail = detail;
+    } else if (typeof detail === 'object' && !Array.isArray(detail)) {
+      const keys = Object.keys(detail);
+      for (let i = 0; i < keys.length; i++) {
+        payload[keys[i]] = detail[keys[i]];
+      }
+    } else {
+      payload.detail = String(detail);
+    }
+  }
+  appendHealthEvent_(ss, eventType, severity, runCtx && runCtx.profileId ? runCtx.profileId : '', formatDiagnosticDetail_(payload));
+}
+
+function summarizeStepDurations_(stepDurations) {
+  const src = stepDurations || {};
+  const keys = Object.keys(src);
+  const output = {};
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    const safeKey = key + '_ms';
+    output[safeKey] = src[key];
+  }
+  return output;
+}
+
+function runTimedStep_(stepDurations, stepName, fn) {
+  const start = Date.now();
+  try {
+    return fn();
+  } finally {
+    stepDurations[stepName] = Date.now() - start;
+  }
+}
+
+function emitDiagnosticsCheckpoint_(ss, diagnostics, eventType, severity, detail) {
+  if (!diagnostics || !diagnostics.runCtx) return;
+  logRunStageEvent_(
+    ss,
+    diagnostics.runCtx,
+    eventType || 'RUN_CHECKPOINT',
+    severity || 'INFO',
+    diagnostics.stage || '',
+    detail || {}
+  );
+}
+
 function appendHealthEvent_(ss, eventType, severity, profileId, detail) {
   const sheet = getSystemDiagnosticsSheet_(ss);
   const lastRow = Math.max(2, sheet.getLastRow());
@@ -933,7 +1356,7 @@ function appendHealthEvent_(ss, eventType, severity, profileId, detail) {
     String(eventType || '').trim(),
     String(severity || '').trim().toUpperCase(),
     String(profileId || '').trim().toUpperCase(),
-    String(detail || '')
+    truncateDiagnosticDetail_(String(detail || ''))
   ]]);
 }
 
@@ -991,7 +1414,24 @@ function finalizeRunContext_(ss, runCtx, options) {
     props.setProperty(SYSTEM_REFERENCE.props.lastImportSignature, runCtx.signature);
   }
 
+  runCtx.queueHealth.openQueueCount = countOpenUnknownLocationQueue_(ss);
   appendRunJournal_(ss, runCtx);
+  try {
+    appendAIDiagnostics_(ss, runCtx);
+  } catch (aiError) {
+    appendHealthEvent_(
+      ss,
+      'AI_DIAGNOSTICS_FAIL',
+      'WARN',
+      runCtx.profileId,
+      formatDiagnosticDetail_({
+        run_id: runCtx.runId,
+        source: runCtx.source,
+        stage: 'finalize',
+        error: String(aiError)
+      })
+    );
+  }
 
   const stageParts = [];
   const stageKeys = Object.keys(runCtx.stageDurations || {});
@@ -1000,11 +1440,34 @@ function finalizeRunContext_(ss, runCtx, options) {
     stageParts.push(key + '=' + runCtx.stageDurations[key] + 'ms');
   }
   if (stageParts.length > 0) {
-    appendHealthEvent_(ss, 'STAGE_TIMINGS', 'INFO', runCtx.profileId, stageParts.join('; '));
+    appendHealthEvent_(
+      ss,
+      'STAGE_TIMINGS',
+      'INFO',
+      runCtx.profileId,
+      formatDiagnosticDetail_({
+        run_id: runCtx.runId,
+        source: runCtx.source,
+        stage: 'pipeline',
+        stages: stageParts.join('|')
+      })
+    );
   }
 
   if (runCtx.outcome && runCtx.outcome !== RUN_OUTCOMES.success) {
-    appendHealthEvent_(ss, 'RUN_OUTCOME', 'WARN', runCtx.profileId, runCtx.outcome + (runCtx.errorCode ? ' (' + runCtx.errorCode + ')' : ''));
+    appendHealthEvent_(
+      ss,
+      'RUN_OUTCOME',
+      'WARN',
+      runCtx.profileId,
+      formatDiagnosticDetail_({
+        run_id: runCtx.runId,
+        source: runCtx.source,
+        stage: 'pipeline',
+        outcome: runCtx.outcome,
+        error_code: runCtx.errorCode || ''
+      })
+    );
   }
 
   updateDailyHomeHealth_(ss, {
@@ -1013,7 +1476,7 @@ function finalizeRunContext_(ss, runCtx, options) {
     lastRunDurationMs: runCtx.durationMs,
     configValidity: props.getProperty(SYSTEM_REFERENCE.props.lastConfigStatus) || 'UNKNOWN',
     schemaStatus: props.getProperty(SYSTEM_REFERENCE.props.lastSchemaStatus) || 'UNKNOWN',
-    unknownQueueOpen: countOpenUnknownLocationQueue_(ss)
+    unknownQueueOpen: runCtx.queueHealth.openQueueCount
   });
 }
 
@@ -1024,6 +1487,7 @@ function runDailyUpdate_(options) {
   const silent = opts.silent === true;
   const source = String(opts.source || 'manual');
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  migrateLegacyTabNames_(ss);
   const ui = SpreadsheetApp.getUi();
   const props = PropertiesService.getDocumentProperties();
   const signature = opts.signature || computeRawImportSignature_(ss) || '';
@@ -1042,12 +1506,22 @@ function runDailyUpdate_(options) {
     ensureChecklistViewConfig_(ss);
     ensureNoReserveRiskTab_(ss);
     ensureSystemDiagnosticsTab_(ss);
+    ensureAIDiagnosticsTab_(ss);
+    logRunStageEvent_(ss, runCtx, 'RUN_START', 'INFO', 'pipeline', {
+      include_checklist: includeChecklist,
+      include_compliance: includeCompliance,
+      signature_present: signature ? true : false
+    });
 
     if (source === 'auto_trigger' && signature) {
       const lastSuccessSignature = props.getProperty(SYSTEM_REFERENCE.props.lastSuccessSignature) || '';
       if (signature === lastSuccessSignature) {
         runCtx.outcome = RUN_OUTCOMES.skippedDuplicate;
         runCtx.errorCode = RUN_OUTCOMES.skippedDuplicate;
+        logRunStageEvent_(ss, runCtx, 'RUN_SKIPPED', 'INFO', 'pipeline', {
+          reason: RUN_OUTCOMES.skippedDuplicate,
+          phase: 'pre_lock'
+        });
         finalizeRunContext_(ss, runCtx, { persistSuccessSignature: false });
         return { ok: false, reason: RUN_OUTCOMES.skippedDuplicate, skipped: true };
       }
@@ -1057,6 +1531,10 @@ function runDailyUpdate_(options) {
     if (!lock.tryLock(1000)) {
       runCtx.outcome = RUN_OUTCOMES.skippedLocked;
       runCtx.errorCode = RUN_OUTCOMES.skippedLocked;
+      logRunStageEvent_(ss, runCtx, 'RUN_SKIPPED', 'WARN', 'pipeline', {
+        reason: RUN_OUTCOMES.skippedLocked,
+        phase: 'lock_acquire'
+      });
       updateDailyHomeSummary_(ss, {
         status: 'BUSY',
         runTimestamp: new Date(),
@@ -1075,21 +1553,48 @@ function runDailyUpdate_(options) {
     }
 
     props.setProperty(SYSTEM_REFERENCE.props.runInProgress, runCtx.runId);
+    logRunStageEvent_(ss, runCtx, 'RUN_LOCK_ACQUIRED', 'INFO', 'pipeline', {});
 
     if (source === 'auto_trigger' && signature) {
       const lockedLastSuccess = props.getProperty(SYSTEM_REFERENCE.props.lastSuccessSignature) || '';
       if (signature === lockedLastSuccess) {
         runCtx.outcome = RUN_OUTCOMES.skippedDuplicate;
         runCtx.errorCode = RUN_OUTCOMES.skippedDuplicate;
+        logRunStageEvent_(ss, runCtx, 'RUN_SKIPPED', 'INFO', 'pipeline', {
+          reason: RUN_OUTCOMES.skippedDuplicate,
+          phase: 'post_lock'
+        });
         finalizeRunContext_(ss, runCtx, { persistSuccessSignature: false });
         return { ok: false, reason: RUN_OUTCOMES.skippedDuplicate, skipped: true };
       }
     }
 
-    profile = runWithStageTiming_(runCtx, 'profile_resolve', () =>
-      resolveActiveStoreProfile_(ss, { allowOverride: true, useRawData: true })
+    profile = runWithStageTiming_(
+      runCtx,
+      'profile_resolve',
+      function() {
+        return resolveActiveStoreProfile_(ss, { allowOverride: true, useRawData: true, signature: signature });
+      },
+      {
+        ss: ss,
+        logStart: true,
+        logEnd: true,
+        buildEndDetails: function(result) {
+          return {
+            profile_id: result && result.profileId ? result.profileId : '',
+            profile_source: result && result.source ? result.source : '',
+            auto_run_enabled: result && result.autoRunEnabled ? true : false,
+            signature_license: getLicenseTokenFromSignature_(signature)
+          };
+        }
+      }
     );
     runCtx.profileId = profile.profileId;
+    mergeStageCounters_(runCtx, 'profile_resolve', {
+      profileId: profile.profileId,
+      profileSource: profile.source || '',
+      autoRunEnabled: profile.autoRunEnabled === true
+    });
     if (!silent) {
       ss.toast('Daily update started for profile ' + profile.profileId + '.', 'Restock Daily Update', 5);
     }
@@ -1105,14 +1610,38 @@ function runDailyUpdate_(options) {
     });
     props.setProperty(SYSTEM_REFERENCE.props.activeProfile, profile.profileId);
 
-    const schemaGate = runWithStageTiming_(runCtx, 'schema_gate', () =>
-      validateRunSchemaGate_(ss, {
-        includeChecklist: includeChecklist,
-        includeCompliance: includeCompliance
-      })
+    const schemaGate = runWithStageTiming_(
+      runCtx,
+      'schema_gate',
+      function() {
+        return validateRunSchemaGate_(ss, {
+          includeChecklist: includeChecklist,
+          includeCompliance: includeCompliance
+        });
+      },
+      {
+        ss: ss,
+        logStart: true,
+        logEnd: true,
+        buildEndDetails: function(result) {
+          return {
+            schema_ok: result && result.ok ? true : false,
+            schema_status: result && result.schemaStatus ? result.schemaStatus : '',
+            config_status: result && result.configStatus ? result.configStatus : '',
+            warning_count: result && result.warnings ? result.warnings.length : 0,
+            blocking_issue_count: result && result.blockingIssues ? result.blockingIssues.length : 0
+          };
+        }
+      }
     );
     props.setProperty(SYSTEM_REFERENCE.props.lastSchemaStatus, schemaGate.schemaStatus);
     props.setProperty(SYSTEM_REFERENCE.props.lastConfigStatus, schemaGate.configStatus);
+    mergeStageCounters_(runCtx, 'schema_gate', {
+      warningCount: schemaGate.warnings.length,
+      blockingIssueCount: schemaGate.blockingIssues.length,
+      schemaStatus: schemaGate.schemaStatus,
+      configStatus: schemaGate.configStatus
+    });
     runCtx.warningCount += schemaGate.warnings.length;
     if (!schemaGate.ok) {
       runCtx.outcome = RUN_OUTCOMES.blockedSchema;
@@ -1136,11 +1665,123 @@ function runDailyUpdate_(options) {
       return { ok: false, reason: RUN_OUTCOMES.blockedSchema, schemaGate: schemaGate };
     }
 
-    runWithStageTiming_(runCtx, 'location_sync', () =>
-      syncLocationRolesForProfile_(ss, profile.profileId, { source: source || 'runDailyUpdate' })
+    const locationSync = runWithStageTiming_(
+      runCtx,
+      'location_sync',
+      function() {
+        return syncLocationRolesForProfile_(ss, profile.profileId, { source: source || 'runDailyUpdate' });
+      },
+      {
+        ss: ss,
+        logStart: true,
+        logEnd: true,
+        buildEndDetails: function(result) {
+          const details = {
+            synced_rows: result && typeof result.rowCount === 'number' ? result.rowCount : 0,
+            skipped_write: result && result.skipped === true,
+            signature_changed: result && result.signatureChanged === true,
+            rows_written: result && typeof result.rowsWritten === 'number' ? result.rowsWritten : 0,
+            checkbox_rebuild_performed: result && result.checkboxRebuildPerformed === true,
+            named_ranges_updated_count: result && typeof result.namedRangesUpdatedCount === 'number' ? result.namedRangesUpdatedCount : 0
+          };
+          if (result && result.expectedSignature) {
+            details.expected_signature = String(result.expectedSignature).slice(0, 12);
+          }
+          if (result && result.existingSignature) {
+            details.existing_signature = String(result.existingSignature).slice(0, 12);
+          }
+          if (result && result.stepDurationsMs) {
+            const stepMetrics = summarizeStepDurations_(result.stepDurationsMs);
+            const keys = Object.keys(stepMetrics);
+            for (let i = 0; i < keys.length; i++) {
+              details[keys[i]] = stepMetrics[keys[i]];
+            }
+          }
+          return details;
+        }
+      }
     );
+    if (locationSync) {
+      mergeStageCounters_(runCtx, 'location_sync', {
+        rowsTotal: locationSync.rowCount || 0,
+        rowsWritten: locationSync.rowsWritten || 0,
+        rowsChanged: locationSync.rowsWritten || 0,
+        checkboxRebuildPerformed: locationSync.checkboxRebuildPerformed === true,
+        namedRangesUpdatedCount: locationSync.namedRangesUpdatedCount || 0
+      });
+    }
 
-    preflight = runWithStageTiming_(runCtx, 'preflight', () => runRestockPreflight_(ss, profile));
+    preflight = runWithStageTiming_(
+      runCtx,
+      'preflight',
+      function() {
+        return runRestockPreflight_(ss, profile);
+      },
+      {
+        ss: ss,
+        logStart: true,
+        logEnd: true,
+        buildEndDetails: function(result) {
+          return {
+            eligible_rows: result && typeof result.eligibleRows === 'number' ? result.eligibleRows : 0,
+            pick_rows: result && typeof result.pickRows === 'number' ? result.pickRows : 0,
+            reserve_rows: result && typeof result.reserveRows === 'number' ? result.reserveRows : 0,
+            unknown_locations: result && typeof result.unknownLocationCount === 'number' ? result.unknownLocationCount : 0,
+            true_unmapped: result && typeof result.trueUnmappedCount === 'number' ? result.trueUnmappedCount : 0,
+            mapped_ignore: result && typeof result.mappedIgnoreCount === 'number' ? result.mappedIgnoreCount : 0,
+            resolved_closed: result && typeof result.resolvedClosedCount === 'number' ? result.resolvedClosedCount : 0,
+            queue_inserted: result && typeof result.queueInsertedCount === 'number' ? result.queueInsertedCount : 0,
+            queue_updated: result && typeof result.queueUpdatedCount === 'number' ? result.queueUpdatedCount : 0,
+            license_distinct: result && typeof result.licenseDistinctCount === 'number' ? result.licenseDistinctCount : 0,
+            dominant_license: result && result.dominantLicense ? result.dominantLicense : '',
+            blocked: result && result.blocked === true
+          };
+        }
+      }
+    );
+    if (preflight) {
+      mergeStageCounters_(runCtx, 'preflight', {
+        rowsTotal: preflight.eligibleRows || 0,
+        pickRows: preflight.pickRows || 0,
+        reserveRows: preflight.reserveRows || 0,
+        trueUnmappedCount: preflight.trueUnmappedCount || preflight.unknownLocationCount || 0,
+        mappedIgnoreCount: preflight.mappedIgnoreCount || 0,
+        resolvedClosedCount: preflight.resolvedClosedCount || 0
+      });
+      runCtx.queueHealth.trueUnmappedCount = preflight.trueUnmappedCount || preflight.unknownLocationCount || 0;
+      runCtx.queueHealth.mappedIgnoreCount = preflight.mappedIgnoreCount || 0;
+      runCtx.queueHealth.resolvedClosedCount = preflight.resolvedClosedCount || 0;
+      runCtx.queueHealth.unknownLocationsCsv = (preflight.unknownLocationNames || []).join('|');
+      appendHealthEvent_(
+        ss,
+        'QUEUE_HEALTH',
+        'INFO',
+        profile.profileId,
+        formatDiagnosticDetail_({
+          run_id: runCtx.runId,
+          source: runCtx.source,
+          stage: 'preflight',
+          true_unmapped: runCtx.queueHealth.trueUnmappedCount,
+          mapped_ignore: runCtx.queueHealth.mappedIgnoreCount,
+          resolved_closed: runCtx.queueHealth.resolvedClosedCount
+        })
+      );
+      if ((preflight.licenseDistinctCount || 0) > 1) {
+        appendHealthEvent_(
+          ss,
+          'MIXED_LICENSE',
+          'WARN',
+          profile.profileId,
+          formatDiagnosticDetail_({
+            run_id: runCtx.runId,
+            source: runCtx.source,
+            stage: 'preflight',
+            license_distinct: preflight.licenseDistinctCount || 0,
+            dominant_license: preflight.dominantLicense || ''
+          })
+        );
+      }
+    }
     if (preflight.blocked) {
       runCtx.outcome = RUN_OUTCOMES.blockedPreflight;
       runCtx.errorCode = RUN_OUTCOMES.blockedPreflight;
@@ -1171,10 +1812,41 @@ function runDailyUpdate_(options) {
 
     if (includeChecklist) {
       if (!silent) {
-        ss.toast('Refreshing restock checklist...', 'Restock Daily Update', 5);
+        ss.toast('Refreshing restock list...', 'Restock Daily Update', 5);
       }
-      checklistResult = runWithStageTiming_(runCtx, 'checklist', () =>
-        refreshChecklist({ silent: true, skipPreflight: true })
+      checklistResult = runWithStageTiming_(
+        runCtx,
+        'checklist',
+        function() {
+          return refreshChecklist({
+            silent: true,
+            skipPreflight: true,
+            runSignature: signature,
+            diagnostics: {
+              runCtx: runCtx,
+              stage: 'checklist'
+            }
+          });
+        },
+        {
+          ss: ss,
+          logStart: true,
+          logEnd: true,
+          buildEndDetails: function(result) {
+            const details = {
+              data_rows: result && typeof result.dataRowCount === 'number' ? result.dataRowCount : 0,
+              ok: result && result.ok === true
+            };
+            if (result && result.diagnostics && result.diagnostics.stepDurationsMs) {
+              const stepMetrics = summarizeStepDurations_(result.diagnostics.stepDurationsMs);
+              const keys = Object.keys(stepMetrics);
+              for (let i = 0; i < keys.length; i++) {
+                details[keys[i]] = stepMetrics[keys[i]];
+              }
+            }
+            return details;
+          }
+        }
       );
       if (!checklistResult || checklistResult.ok !== true) {
         runCtx.outcome = RUN_OUTCOMES.failedChecklist;
@@ -1202,8 +1874,42 @@ function runDailyUpdate_(options) {
       if (!silent) {
         ss.toast('Running compliance audit...', 'Restock Daily Update', 5);
       }
-      complianceResult = runWithStageTiming_(runCtx, 'compliance', () =>
-        runComplianceCheck({ silent: true, source: source || 'runDailyUpdate' })
+      complianceResult = runWithStageTiming_(
+        runCtx,
+        'compliance',
+        function() {
+          return runComplianceCheck({
+            silent: true,
+            source: source || 'runDailyUpdate',
+            diagnostics: {
+              runCtx: runCtx,
+              stage: 'compliance'
+            }
+          });
+        },
+        {
+          ss: ss,
+          logStart: true,
+          logEnd: true,
+          buildEndDetails: function(result) {
+            const summary = (result && result.summary) ? result.summary : {};
+            const details = {
+              ok: result && result.ok === true,
+              total_rows_scanned: summary.totalRowsScanned || 0,
+              processed_rows_scanned: summary.processedRowsScanned || 0,
+              flagged_rows: summary.flaggedRowsCount || 0,
+              warning_count: result && result.warnings ? result.warnings.length : 0
+            };
+            if (result && result.diagnostics && result.diagnostics.stepDurationsMs) {
+              const stepMetrics = summarizeStepDurations_(result.diagnostics.stepDurationsMs);
+              const keys = Object.keys(stepMetrics);
+              for (let i = 0; i < keys.length; i++) {
+                details[keys[i]] = stepMetrics[keys[i]];
+              }
+            }
+            return details;
+          }
+        }
       );
       if (!complianceResult || complianceResult.ok !== true) {
         runCtx.outcome = RUN_OUTCOMES.failedCompliance;
@@ -1233,14 +1939,33 @@ function runDailyUpdate_(options) {
     if (!silent) {
       ss.toast('Finalizing outputs...', 'Restock Daily Update', 5);
     }
-    const noReserveRisk = runWithStageTiming_(runCtx, 'finalize', () => {
-      SpreadsheetApp.flush();
-      return getNoReserveRiskCount_(ss);
-    });
+    const noReserveRisk = runWithStageTiming_(
+      runCtx,
+      'finalize',
+      function() {
+        SpreadsheetApp.flush();
+        return getNoReserveRiskCount_(ss);
+      },
+      {
+        ss: ss,
+        logStart: true,
+        logEnd: true,
+        buildEndDetails: function(result) {
+          return {
+            no_reserve_rows: typeof result === 'number' ? result : 0
+          };
+        }
+      }
+    );
     runCtx.noReserveRows = noReserveRisk;
-    const nextStep = noReserveRisk > 0
-      ? 'Open No_Reserve_Risk first and resolve critical reorder/transfer actions.'
-      : 'Open Restock Checklist and execute pulls.';
+    mergeStageCounters_(runCtx, 'finalize', {
+      noReserveRows: noReserveRisk
+    });
+    const nextStep = flagged > 0
+      ? 'Open Compliance Alerts and resolve flagged compliance issues first.'
+      : (noReserveRisk > 0
+        ? 'Review Backstock Alerts, then execute Restock List pulls.'
+        : 'Open Restock List and execute pulls.');
     updateDailyHomeSummary_(ss, {
       status: 'COMPLETE',
       runTimestamp: new Date(),
@@ -1259,17 +1984,26 @@ function runDailyUpdate_(options) {
     const currentDurationMs = Math.max(0, Date.now() - runCtx.startedMs);
     if (currentDurationMs > perfThreshold) {
       runCtx.warningCount++;
+      runCtx.perfWarn = true;
       appendHealthEvent_(
         ss,
         'PERF_WARN',
         'WARN',
         profile.profileId,
-        'Run exceeded threshold: ' + currentDurationMs + 'ms > ' + perfThreshold + 'ms'
+        formatDiagnosticDetail_({
+          run_id: runCtx.runId,
+          source: runCtx.source,
+          stage: 'pipeline',
+          duration_ms: currentDurationMs,
+          threshold_ms: perfThreshold
+        })
       );
     }
 
     if (!silent) {
-      const destination = noReserveRisk > 0 ? ss.getSheetByName('No_Reserve_Risk') : ss.getSheetByName('Restock Checklist');
+      const destination = flagged > 0
+        ? getSheetByCompatName_(ss, COMPLIANCE_DEFAULTS.outputSheetName)
+        : getSheetByCompatName_(ss, 'Restock List');
       if (destination) {
         ss.setActiveSheet(destination);
       }
@@ -1277,7 +2011,7 @@ function runDailyUpdate_(options) {
         'Daily update complete.\n\n' +
         'Profile: ' + profile.profileId + '\n' +
         'Checklist rows: ' + checklistRows + '\n' +
-        'No Reserve Risk rows: ' + noReserveRisk + '\n' +
+        'Backstock Alerts rows: ' + noReserveRisk + '\n' +
         'Compliance flagged: ' + flagged + '\n' +
         'Unknown locations queued: ' + preflight.unknownLocationCount
       );
@@ -1286,6 +2020,13 @@ function runDailyUpdate_(options) {
     if (signature) {
       props.setProperty(SYSTEM_REFERENCE.props.lastImportRunTs, String(Date.now()));
     }
+    logRunStageEvent_(ss, runCtx, 'RUN_COMPLETE', 'INFO', 'pipeline', {
+      outcome: RUN_OUTCOMES.success,
+      checklist_rows: checklistRows,
+      no_reserve_rows: noReserveRisk,
+      compliance_flagged: flagged,
+      warning_count: runCtx.warningCount
+    });
     finalizeRunContext_(ss, runCtx, { persistSuccessSignature: true });
 
     return {
@@ -1312,7 +2053,9 @@ function runDailyUpdate_(options) {
     if (!silent) {
       ui.alert('Daily update failed.\n\n' + error);
     }
-    appendHealthEvent_(ss, 'RUN_EXCEPTION', 'ERROR', runCtx.profileId, String(error));
+    logRunStageEvent_(ss, runCtx, 'RUN_EXCEPTION', 'ERROR', 'pipeline', {
+      error: String(error)
+    });
     finalizeRunContext_(ss, runCtx, { persistSuccessSignature: false });
     return { ok: false, reason: RUN_OUTCOMES.failedException, error: String(error) };
   } finally {
@@ -1327,7 +2070,7 @@ function runDailyUpdate_(options) {
 }
 
 function getNoReserveRiskCount_(ss) {
-  const sheet = ss.getSheetByName('No_Reserve_Risk');
+  const sheet = getSheetByCompatName_(ss, 'Backstock Alerts');
   if (!sheet) return 0;
   const startRow = 7;
   const lastRow = Math.max(startRow, sheet.getLastRow());
@@ -1459,7 +2202,15 @@ function runRestockPreflight_(ss, activeProfile) {
     pickRows: 0,
     reserveRows: 0,
     unknownLocationCount: 0,
+    trueUnmappedCount: 0,
+    mappedIgnoreCount: 0,
+    resolvedClosedCount: 0,
+    queueInsertedCount: 0,
+    queueUpdatedCount: 0,
+    unknownLocationNames: [],
     unknownLocationMap: {},
+    licenseDistinctCount: 0,
+    dominantLicense: '',
     blocked: false
   };
 
@@ -1474,6 +2225,7 @@ function runRestockPreflight_(ss, activeProfile) {
 
   const rowCount = lastRow - CONFIG.rawDataStartRow;
   const requiredColCount = Math.max(
+    CONFIG.treezColIndex.receivingLicense,
     CONFIG.treezColIndex.inventoryType,
     CONFIG.treezColIndex.productType,
     CONFIG.treezColIndex.available,
@@ -1482,6 +2234,7 @@ function runRestockPreflight_(ss, activeProfile) {
   const data = rawSheet.getRange(CONFIG.rawDataStartRow + 1, 1, rowCount, requiredColCount).getValues();
   const roleMap = getLocationRoleMapFromSettings_(settingsSheet);
   const allowedTypes = new Set(CONFIG.allowedProductTypes.map(t => t.toUpperCase()));
+  const licenseCounts = {};
 
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
@@ -1493,6 +2246,10 @@ function runRestockPreflight_(ss, activeProfile) {
     }
 
     result.eligibleRows++;
+    const receivingLicense = normalizeToken_(row[CONFIG.treezColIndex.receivingLicense - 1]);
+    if (receivingLicense) {
+      licenseCounts[receivingLicense] = (licenseCounts[receivingLicense] || 0) + 1;
+    }
     const location = String(row[CONFIG.treezColIndex.location - 1] || '').toUpperCase().trim();
     const role = roleMap[location];
 
@@ -1500,8 +2257,12 @@ function runRestockPreflight_(ss, activeProfile) {
       result.pickRows++;
     } else if (role === 'RESERVE') {
       result.reserveRows++;
+    } else if (role === 'IGNORE') {
+      // Explicitly mapped staging/hold locations are expected and should not be treated as unknown.
+      result.mappedIgnoreCount++;
+      continue;
     } else {
-      result.unknownLocationCount++;
+      result.trueUnmappedCount++;
       if (!result.unknownLocationMap[location]) {
         result.unknownLocationMap[location] = 0;
       }
@@ -1509,7 +2270,16 @@ function runRestockPreflight_(ss, activeProfile) {
     }
   }
 
-  appendLocationReviewQueue_(ss, profileId, result.unknownLocationMap);
+  const queueAppend = appendLocationReviewQueue_(ss, profileId, result.unknownLocationMap);
+  const queueClose = closeResolvedLocationQueueItems_(ss, profileId, roleMap);
+  result.queueInsertedCount = queueAppend.insertedCount || 0;
+  result.queueUpdatedCount = queueAppend.updatedCount || 0;
+  result.resolvedClosedCount = queueClose.closedCount || 0;
+  const licenses = Object.keys(licenseCounts).sort((a, b) => licenseCounts[b] - licenseCounts[a]);
+  result.licenseDistinctCount = licenses.length;
+  result.dominantLicense = licenses.length > 0 ? licenses[0] : '';
+  result.unknownLocationNames = Object.keys(result.unknownLocationMap).sort();
+  result.unknownLocationCount = result.trueUnmappedCount;
   result.blocked = result.eligibleRows > 0 && result.pickRows > 0 && result.reserveRows === 0;
   return result;
 }
@@ -1542,7 +2312,12 @@ function getLocationRoleMapFromSettings_(settingsSheet) {
 function appendLocationReviewQueue_(ss, profileId, unknownLocationMap) {
   const locationCounts = unknownLocationMap || {};
   const unknownLocations = Object.keys(locationCounts).filter(k => k);
-  if (unknownLocations.length === 0) return;
+  if (unknownLocations.length === 0) {
+    return {
+      insertedCount: 0,
+      updatedCount: 0
+    };
+  }
 
   const sheet = getSystemReferenceSheet_(ss);
   const lastRow = Math.max(2, sheet.getLastRow());
@@ -1564,6 +2339,7 @@ function appendLocationReviewQueue_(ss, profileId, unknownLocationMap) {
   }
 
   const rowsToAppend = [];
+  let updatedCount = 0;
   const runTs = new Date();
   const profileToken = String(profileId || '').toUpperCase().trim();
   for (let i = 0; i < unknownLocations.length; i++) {
@@ -1581,6 +2357,7 @@ function appendLocationReviewQueue_(ss, profileId, unknownLocationMap) {
       }
       sheet.getRange(existingOpen.rowNumber, 20).setValue(nextCount); // seen_count
       sheet.getRange(existingOpen.rowNumber, 21).setValue(runTs); // last_seen_ts
+      updatedCount++;
       continue;
     }
 
@@ -1600,6 +2377,65 @@ function appendLocationReviewQueue_(ss, profileId, unknownLocationMap) {
     const appendStart = sheet.getLastRow() + 1;
     sheet.getRange(appendStart, 14, rowsToAppend.length, 8).setValues(rowsToAppend);
   }
+  return {
+    insertedCount: rowsToAppend.length,
+    updatedCount: updatedCount
+  };
+}
+
+function closeResolvedLocationQueueItems_(ss, profileId, roleMap) {
+  const profileToken = String(profileId || '').toUpperCase().trim();
+  if (!profileToken || !roleMap) {
+    return {
+      closedCount: 0,
+      mappedCount: 0,
+      ignoredCount: 0
+    };
+  }
+
+  const sheet = getSystemReferenceSheet_(ss);
+  const lastRow = Math.max(2, sheet.getLastRow());
+  if (lastRow < 2) {
+    return {
+      closedCount: 0,
+      mappedCount: 0,
+      ignoredCount: 0
+    };
+  }
+
+  const rows = sheet.getRange(2, 14, lastRow - 1, 8).getValues();
+  const now = new Date();
+  let closedCount = 0;
+  let mappedCount = 0;
+  let ignoredCount = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const rowNumber = i + 2;
+    const rowProfile = String(rows[i][1] || '').toUpperCase().trim();
+    const location = String(rows[i][2] || '').toUpperCase().trim();
+    const status = String(rows[i][4] || '').toUpperCase().trim();
+    if (rowProfile !== profileToken) continue;
+    if (!location) continue;
+    if (status && status !== 'NEW' && status !== 'OPEN') continue;
+
+    const mappedRole = String(roleMap[location] || '').toUpperCase().trim();
+    if (!mappedRole) continue;
+
+    const resolvedStatus = mappedRole === 'IGNORE' ? 'IGNORED' : 'MAPPED';
+    sheet.getRange(rowNumber, 17).setValue(mappedRole); // suggested_role
+    sheet.getRange(rowNumber, 18).setValue(resolvedStatus); // status
+    sheet.getRange(rowNumber, 21).setValue(now); // last_seen_ts
+    closedCount++;
+    if (resolvedStatus === 'MAPPED') {
+      mappedCount++;
+    } else {
+      ignoredCount++;
+    }
+  }
+  return {
+    closedCount: closedCount,
+    mappedCount: mappedCount,
+    ignoredCount: ignoredCount
+  };
 }
 
 function inferSuggestedRoleForLocation_(locationName) {
@@ -1652,11 +2488,14 @@ function handleSpreadsheetChange(e) {
     if (!allowedTypes[changeType]) return;
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const profile = resolveActiveStoreProfile_(ss, { allowOverride: true, useRawData: true });
-    if (!profile.autoRunEnabled) return;
-
     const signature = computeRawImportSignature_(ss);
     if (!signature) return;
+    const profile = resolveActiveStoreProfile_(ss, {
+      allowOverride: true,
+      useRawData: true,
+      signature: signature
+    });
+    if (!profile.autoRunEnabled) return;
 
     const props = PropertiesService.getDocumentProperties();
     const previousSignature = props.getProperty(SYSTEM_REFERENCE.props.lastSuccessSignature) || '';
@@ -1748,27 +2587,83 @@ function refreshChecklist(options) {
   const opts = options || {};
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const ui = SpreadsheetApp.getUi();
-  const sheet = ss.getSheetByName('Restock Checklist');
+  const sheet = getSheetByCompatName_(ss, 'Restock List');
+  const settingsSheet = ss.getSheetByName('Restock Settings');
+  const docProps = PropertiesService.getDocumentProperties();
+  const diagnostics = opts.diagnostics || null;
+  const stepDurations = {};
+  const metrics = {
+    rowsScanned: 0,
+    dataRows: 0,
+    clearRange: 0,
+    previousRows: 0,
+    rulesShortcutApplied: false,
+    rowsChanged: 0
+  };
   
   if (!sheet) {
+    emitDiagnosticsCheckpoint_(ss, diagnostics, 'CHECKLIST_ABORT', 'ERROR', {
+      reason: 'MISSING_CHECKLIST_SHEET'
+    });
     if (!opts.silent) {
-      ui.alert('Restock Checklist tab not found. Run main() first.');
+      ui.alert('Restock List tab not found. Run main() first.');
     }
-    return { ok: false, reason: 'MISSING_CHECKLIST_SHEET' };
+    return {
+      ok: false,
+      reason: 'MISSING_CHECKLIST_SHEET',
+      diagnostics: {
+        stepDurationsMs: stepDurations,
+        metrics: metrics
+      }
+    };
   }
 
   ensureDailyHomeTab_(ss);
   ensureChecklistViewConfig_(ss);
   ensureNoReserveRiskTab_(ss);
+  emitDiagnosticsCheckpoint_(ss, diagnostics, 'CHECKLIST_PROGRESS', 'INFO', {
+    phase: 'start',
+    skip_preflight: opts.skipPreflight === true
+  });
+
+  const rawSignature = String(opts.runSignature || computeRawImportSignature_(ss) || '');
+  const rulesSignature = computeStockingRulesSignature_(settingsSheet);
+  const previousRawSignature = docProps.getProperty(SYSTEM_REFERENCE.props.lastChecklistRawSignature) || '';
+  const previousRulesSignature = docProps.getProperty(SYSTEM_REFERENCE.props.lastChecklistRulesSignature) || '';
+  const rulesShortcutApplied =
+    opts.forceReapplyRules !== true &&
+    !!rawSignature &&
+    rawSignature === previousRawSignature &&
+    !!rulesSignature &&
+    rulesSignature === previousRulesSignature;
+  metrics.rulesShortcutApplied = rulesShortcutApplied;
 
   let preflight = null;
   let activeProfile = null;
   if (!opts.skipPreflight) {
-    activeProfile = resolveActiveStoreProfile_(ss, { allowOverride: true, useRawData: true });
-    syncLocationRolesForProfile_(ss, activeProfile.profileId, { source: 'refreshChecklist' });
-    preflight = runRestockPreflight_(ss, activeProfile);
+    activeProfile = runTimedStep_(stepDurations, 'preflight_profile_resolve', function() {
+      return resolveActiveStoreProfile_(ss, {
+        allowOverride: true,
+        useRawData: true,
+        signature: rawSignature
+      });
+    });
+    runTimedStep_(stepDurations, 'preflight_location_sync', function() {
+      return syncLocationRolesForProfile_(ss, activeProfile.profileId, { source: 'refreshChecklist' });
+    });
+    preflight = runTimedStep_(stepDurations, 'preflight_check', function() {
+      return runRestockPreflight_(ss, activeProfile);
+    });
 
     if (preflight.blocked) {
+      emitDiagnosticsCheckpoint_(ss, diagnostics, 'CHECKLIST_ABORT', 'WARN', {
+        reason: 'PREFLIGHT_BLOCKED',
+        profile_id: preflight.profileId,
+        eligible_rows: preflight.eligibleRows,
+        pick_rows: preflight.pickRows,
+        reserve_rows: preflight.reserveRows,
+        unknown_locations: preflight.unknownLocationCount
+      });
       if (!opts.silent) {
         ui.alert(
           'Checklist run blocked.\n\n' +
@@ -1780,133 +2675,225 @@ function refreshChecklist(options) {
           'Reason: reserve coverage is effectively zero. Update location mappings in System_Reference.'
         );
       }
-      return { ok: false, reason: 'PREFLIGHT_BLOCKED', preflight: preflight };
+      return {
+        ok: false,
+        reason: 'PREFLIGHT_BLOCKED',
+        preflight: preflight,
+        diagnostics: {
+          stepDurationsMs: stepDurations,
+          metrics: metrics
+        }
+      };
     }
   }
   
   // Apply stocking rules first (populates Target/Warning/Critical in Engine)
   Logger.log('Applying stocking rules...');
-  applyStockingRules();
+  if (rulesShortcutApplied) {
+    runTimedStep_(stepDurations, 'apply_stocking_rules', function() {
+      // Steady-state shortcut: rules + import signature unchanged, so keep previous rule output.
+      return;
+    });
+  } else {
+    runTimedStep_(stepDurations, 'apply_stocking_rules', function() {
+      applyStockingRules();
+    });
+    runTimedStep_(stepDurations, 'post_rules_flush', function() {
+      SpreadsheetApp.flush();
+    });
+    if (rawSignature) {
+      docProps.setProperty(SYSTEM_REFERENCE.props.lastChecklistRawSignature, rawSignature);
+    }
+    if (rulesSignature) {
+      docProps.setProperty(SYSTEM_REFERENCE.props.lastChecklistRulesSignature, rulesSignature);
+    }
+  }
+  emitDiagnosticsCheckpoint_(ss, diagnostics, 'CHECKLIST_PROGRESS', 'INFO', {
+    phase: 'stocking_rules_complete',
+    apply_stocking_rules_ms: stepDurations.apply_stocking_rules || 0,
+    post_rules_flush_ms: stepDurations.post_rules_flush || 0,
+    rules_shortcut_applied: rulesShortcutApplied
+  });
   
   const dataStartRow = 3;
   const headerRow = 2;
   
   // Count actual data rows by checking column A (Urgency) in a bounded range.
-  const lastUsedRow = Math.max(dataStartRow, sheet.getLastRow());
+  const lastUsedRow = runTimedStep_(stepDurations, 'resolve_last_used_row', function() {
+    return Math.max(dataStartRow, sheet.getLastRow());
+  });
   const rowsToScan = Math.max(0, lastUsedRow - dataStartRow + 1);
-  const urgencyCol = rowsToScan > 0
-    ? sheet.getRange(dataStartRow, 1, rowsToScan, 1).getDisplayValues()
-    : [];
-  let dataRowCount = 0;
-  for (let i = 0; i < urgencyCol.length; i++) {
-    if (urgencyCol[i][0] === '' || urgencyCol[i][0] === null) break;
-    dataRowCount++;
-  }
+  metrics.rowsScanned = rowsToScan;
+  const urgencyCol = runTimedStep_(stepDurations, 'read_urgency_column', function() {
+    return rowsToScan > 0
+      ? sheet.getRange(dataStartRow, 1, rowsToScan, 1).getDisplayValues()
+      : [];
+  });
+  const dataRowCount = runTimedStep_(stepDurations, 'count_data_rows', function() {
+    let count = 0;
+    for (let i = 0; i < urgencyCol.length; i++) {
+      if (urgencyCol[i][0] === '' || urgencyCol[i][0] === null) break;
+      count++;
+    }
+    return count;
+  });
+  metrics.dataRows = dataRowCount;
+  metrics.rowsTotal = rowsToScan;
+  emitDiagnosticsCheckpoint_(ss, diagnostics, 'CHECKLIST_PROGRESS', 'INFO', {
+    phase: 'row_count_complete',
+    rows_scanned: rowsToScan,
+    data_rows: dataRowCount
+  });
   
   if (dataRowCount === 0) {
+    emitDiagnosticsCheckpoint_(ss, diagnostics, 'CHECKLIST_ABORT', 'WARN', {
+      reason: 'NO_CHECKLIST_ROWS',
+      rows_scanned: rowsToScan
+    });
     if (!opts.silent) {
       ui.alert(
-        'No data found in Restock Checklist.\n\n' +
+        'No data found in Restock List.\n\n' +
         'Make sure you:\n' +
         '1. Imported CSV to "Treez Valuation (Raw)" tab\n' +
         '2. Raw header row is 6 and data starts at row 7\n' +
         '3. Location mappings are synced for the active store profile'
       );
     }
-    return { ok: false, reason: 'NO_CHECKLIST_ROWS', preflight: preflight };
+    return {
+      ok: false,
+      reason: 'NO_CHECKLIST_ROWS',
+      preflight: preflight,
+      diagnostics: {
+        stepDurationsMs: stepDurations,
+        metrics: metrics
+      }
+    };
   }
   
   Logger.log('Found ' + dataRowCount + ' products needing restock');
-  const docProps = PropertiesService.getDocumentProperties();
   const lastChecklistRowsProp = docProps.getProperty(SYSTEM_REFERENCE.props.lastChecklistRows);
   const previousRows = parseInt(lastChecklistRowsProp || '0', 10);
   const previousRowsSafe = isNaN(previousRows) ? 0 : previousRows;
-
-  // Clear old checkboxes/validation from a bounded dynamic range.
-  const clearRange = Math.max(200, dataRowCount, previousRowsSafe);
-  sheet.getRange(dataStartRow, 14, clearRange, 1).clearDataValidations(); // Status column
-  sheet.getRange(dataStartRow, 15, clearRange, 1).clearDataValidations(); // Done column (removes checkboxes)
-  sheet.getRange(dataStartRow, 15, clearRange, 1).clearContent(); // Clear checkbox values
-  
-  // Add data validation for Restock Status column (exactly dataRowCount rows)
-  const statusValidation = SpreadsheetApp.newDataValidation()
-    .requireValueInList(CONFIG.restockStatusOptions, true)
-    .setAllowInvalid(false)
-    .build();
-  sheet.getRange(dataStartRow, 14, dataRowCount, 1).setDataValidation(statusValidation);
-  
-  // Add checkboxes for Done column (exactly dataRowCount rows)
-  sheet.getRange(dataStartRow, 15, dataRowCount, 1).insertCheckboxes();
-  
-  // Apply full grid borders to all data cells
-  const numCols = CONFIG.checklistColumns.length;
-  const dataRange = sheet.getRange(dataStartRow, 1, dataRowCount, numCols);
-  
-  // Full grid - borders around every cell
-  dataRange.setBorder(true, true, true, true, true, true, 
-    CONFIG.colors.border, SpreadsheetApp.BorderStyle.SOLID);
-  
-  // Thicker borders between column groups for visual separation
-  const borderRows = dataRowCount + 1; // header + data
-  
-  // Border after Identity (col 6)
-  sheet.getRange(headerRow, 6, borderRows, 1).setBorder(null, null, null, true, null, null, CONFIG.colors.border, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
-  
-  // Border after Stock (col 9)
-  sheet.getRange(headerRow, 9, borderRows, 1).setBorder(null, null, null, true, null, null, CONFIG.colors.border, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
-  
-  // Border after Pull Plan (col 12)
-  sheet.getRange(headerRow, 12, borderRows, 1).setBorder(null, null, null, true, null, null, CONFIG.colors.border, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
-  
-  // Border after Execution (col 16)
-  sheet.getRange(headerRow, 16, borderRows, 1).setBorder(null, null, null, true, null, null, CONFIG.colors.border, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
-  
-  // Set column alignments in batches to reduce API calls.
-  const dataEndRow = dataStartRow + dataRowCount - 1;
-  const leftAlignCols = [2, 3, 4, 5, 6, 11, 12, 16];
-  const centerAlignCols = [1, 7, 8, 9, 10, 13, 14, 15, 17, 18];
-  const leftRanges = leftAlignCols.map(col => {
-    const letter = columnToLetter_(col);
-    return letter + dataStartRow + ':' + letter + dataEndRow;
-  });
-  const centerRanges = centerAlignCols.map(col => {
-    const letter = columnToLetter_(col);
-    return letter + dataStartRow + ':' + letter + dataEndRow;
-  });
-  sheet.getRangeList(leftRanges).setHorizontalAlignment('left');
-  sheet.getRangeList(centerRanges).setHorizontalAlignment('center');
-  
-  // Update row visibility with diff logic to avoid expensive full show/hide cycles.
-  const lastMaxRow = sheet.getMaxRows();
   const hasPriorState = lastChecklistRowsProp !== null;
+  const structuralRefreshNeeded = !hasPriorState || previousRowsSafe !== dataRowCount || opts.forceChecklistStructure === true;
+  metrics.previousRows = previousRowsSafe;
+  metrics.structuralRefresh = structuralRefreshNeeded;
 
-  if (!hasPriorState) {
-    if (lastMaxRow > dataStartRow) {
-      sheet.showRows(dataStartRow, lastMaxRow - dataStartRow + 1);
-    }
-    const firstEmptyRow = dataStartRow + dataRowCount;
-    const rowsToHide = lastMaxRow - firstEmptyRow + 1;
-    if (rowsToHide > 0 && firstEmptyRow <= lastMaxRow) {
-      sheet.hideRows(firstEmptyRow, rowsToHide);
-    }
-  } else if (previousRowsSafe !== dataRowCount) {
-    const prevFirstEmpty = dataStartRow + previousRowsSafe;
-    const newFirstEmpty = dataStartRow + dataRowCount;
-    if (newFirstEmpty > prevFirstEmpty) {
-      const rowsToShow = Math.min(lastMaxRow, newFirstEmpty - 1) - prevFirstEmpty + 1;
-      if (rowsToShow > 0 && prevFirstEmpty <= lastMaxRow) {
-        sheet.showRows(prevFirstEmpty, rowsToShow);
+  // Reset checkbox values every run; only rebuild validation/formatting when structure changes.
+  const clearRange = Math.max(200, dataRowCount, previousRowsSafe);
+  metrics.clearRange = clearRange;
+  runTimedStep_(stepDurations, 'reset_done_column', function() {
+    sheet.getRange(dataStartRow, 15, clearRange, 1).clearContent(); // Clear checkbox values
+  });
+
+  if (structuralRefreshNeeded) {
+    runTimedStep_(stepDurations, 'clear_validation_ranges', function() {
+      sheet.getRange(dataStartRow, 14, clearRange, 1).clearDataValidations(); // Status column
+      sheet.getRange(dataStartRow, 15, clearRange, 1).clearDataValidations(); // Done column (removes checkboxes)
+    });
+    
+    // Add data validation for Restock Status column (exactly dataRowCount rows)
+    runTimedStep_(stepDurations, 'apply_validation_controls', function() {
+      const statusValidation = SpreadsheetApp.newDataValidation()
+        .requireValueInList(CONFIG.restockStatusOptions, true)
+        .setAllowInvalid(false)
+        .build();
+      sheet.getRange(dataStartRow, 14, dataRowCount, 1).setDataValidation(statusValidation);
+      
+      // Add checkboxes for Done column (exactly dataRowCount rows)
+      sheet.getRange(dataStartRow, 15, dataRowCount, 1).insertCheckboxes();
+    });
+    
+    runTimedStep_(stepDurations, 'apply_grid_formatting', function() {
+      // Apply full grid borders to all data cells
+      const numCols = CONFIG.checklistColumns.length;
+      const dataRange = sheet.getRange(dataStartRow, 1, dataRowCount, numCols);
+      
+      // Full grid - borders around every cell
+      dataRange.setBorder(true, true, true, true, true, true, 
+        CONFIG.colors.border, SpreadsheetApp.BorderStyle.SOLID);
+      
+      // Thicker borders between column groups for visual separation
+      const borderRows = dataRowCount + 1; // header + data
+      
+      // Border after Identity (col 6)
+      sheet.getRange(headerRow, 6, borderRows, 1).setBorder(null, null, null, true, null, null, CONFIG.colors.border, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+      
+      // Border after Stock (col 9)
+      sheet.getRange(headerRow, 9, borderRows, 1).setBorder(null, null, null, true, null, null, CONFIG.colors.border, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+      
+      // Border after Pull Plan (col 12)
+      sheet.getRange(headerRow, 12, borderRows, 1).setBorder(null, null, null, true, null, null, CONFIG.colors.border, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+      
+      // Border after Execution (col 16)
+      sheet.getRange(headerRow, 16, borderRows, 1).setBorder(null, null, null, true, null, null, CONFIG.colors.border, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+      
+      // Set column alignments in batches to reduce API calls.
+      const dataEndRow = dataStartRow + dataRowCount - 1;
+      const leftAlignCols = [2, 3, 4, 5, 6, 11, 12, 16];
+      const centerAlignCols = [1, 7, 8, 9, 10, 13, 14, 15, 17, 18];
+      const leftRanges = leftAlignCols.map(col => {
+        const letter = columnToLetter_(col);
+        return letter + dataStartRow + ':' + letter + dataEndRow;
+      });
+      const centerRanges = centerAlignCols.map(col => {
+        const letter = columnToLetter_(col);
+        return letter + dataStartRow + ':' + letter + dataEndRow;
+      });
+      sheet.getRangeList(leftRanges).setHorizontalAlignment('left');
+      sheet.getRangeList(centerRanges).setHorizontalAlignment('center');
+    });
+    
+    runTimedStep_(stepDurations, 'update_row_visibility', function() {
+      // Update row visibility with diff logic to avoid expensive full show/hide cycles.
+      const lastMaxRow = sheet.getMaxRows();
+
+      if (!hasPriorState) {
+        if (lastMaxRow > dataStartRow) {
+          sheet.showRows(dataStartRow, lastMaxRow - dataStartRow + 1);
+        }
+        const firstEmptyRow = dataStartRow + dataRowCount;
+        const rowsToHide = lastMaxRow - firstEmptyRow + 1;
+        if (rowsToHide > 0 && firstEmptyRow <= lastMaxRow) {
+          sheet.hideRows(firstEmptyRow, rowsToHide);
+        }
+      } else if (previousRowsSafe !== dataRowCount) {
+        const prevFirstEmpty = dataStartRow + previousRowsSafe;
+        const newFirstEmpty = dataStartRow + dataRowCount;
+        if (newFirstEmpty > prevFirstEmpty) {
+          const rowsToShow = Math.min(lastMaxRow, newFirstEmpty - 1) - prevFirstEmpty + 1;
+          if (rowsToShow > 0 && prevFirstEmpty <= lastMaxRow) {
+            sheet.showRows(prevFirstEmpty, rowsToShow);
+          }
+        } else {
+          const rowsToHide = Math.min(lastMaxRow, prevFirstEmpty - 1) - newFirstEmpty + 1;
+          if (rowsToHide > 0 && newFirstEmpty <= lastMaxRow) {
+            sheet.hideRows(newFirstEmpty, rowsToHide);
+          }
+        }
       }
-    } else {
-      const rowsToHide = Math.min(lastMaxRow, prevFirstEmpty - 1) - newFirstEmpty + 1;
-      if (rowsToHide > 0 && newFirstEmpty <= lastMaxRow) {
-        sheet.hideRows(newFirstEmpty, rowsToHide);
-      }
-    }
+    });
   }
-  docProps.setProperty(SYSTEM_REFERENCE.props.lastChecklistRows, String(dataRowCount));
+  runTimedStep_(stepDurations, 'persist_last_row_count', function() {
+    docProps.setProperty(SYSTEM_REFERENCE.props.lastChecklistRows, String(dataRowCount));
+  });
+  metrics.rowsChanged = dataRowCount;
   
   Logger.log('Checklist refreshed: ' + dataRowCount + ' rows active');
+  const detail = {
+    data_rows: dataRowCount,
+    rows_scanned: metrics.rowsScanned,
+    clear_range: clearRange,
+    previous_rows: previousRowsSafe,
+    structural_refresh: structuralRefreshNeeded,
+    rules_shortcut_applied: metrics.rulesShortcutApplied === true
+  };
+  const stepMetrics = summarizeStepDurations_(stepDurations);
+  const stepKeys = Object.keys(stepMetrics);
+  for (let i = 0; i < stepKeys.length; i++) {
+    detail[stepKeys[i]] = stepMetrics[stepKeys[i]];
+  }
+  emitDiagnosticsCheckpoint_(ss, diagnostics, 'CHECKLIST_DETAIL', 'INFO', detail);
   if (!opts.silent) {
     ui.alert('Checklist refreshed!\n\n' + dataRowCount + ' products ready for restock.');
   }
@@ -1914,7 +2901,11 @@ function refreshChecklist(options) {
     ok: true,
     dataRowCount: dataRowCount,
     preflight: preflight,
-    profileId: activeProfile ? activeProfile.profileId : ''
+    profileId: activeProfile ? activeProfile.profileId : '',
+    diagnostics: {
+      stepDurationsMs: stepDurations,
+      metrics: metrics
+    }
   };
 }
 
@@ -1924,6 +2915,7 @@ function refreshChecklist(options) {
 function onOpen() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const storedMode = getStoredWorkspaceModeSafe_();
+  migrateLegacyTabNames_(ss);
   addRestockMenu_(storedMode);
 
   // Keep initialization best-effort so menu creation is never blocked.
@@ -1931,6 +2923,7 @@ function onOpen() {
     ensureDailyHomeTab_(ss);
     ensureNoReserveRiskTab_(ss);
     ensureSystemDiagnosticsTab_(ss);
+    ensureAIDiagnosticsTab_(ss);
     ensureChecklistViewConfig_(ss);
     refreshDailyHomeHealthFromState_(ss);
     applyWorkspaceView_(ss, storedMode, { silent: true, persist: false });
@@ -1963,7 +2956,7 @@ function addRestockMenu_(storedMode) {
     .addItem('Manager', 'setManagerView');
 
   const menu = ui.createMenu('Restock')
-    .addItem('Open Daily Home', 'openDailyHome')
+    .addItem('Open Home', 'openDailyHome')
     .addSeparator()
     .addItem('Run Daily Update', 'runDailyUpdate')
     .addSeparator()
@@ -1984,7 +2977,9 @@ function addRestockMenu_(storedMode) {
     menu
       .addSeparator()
       .addItem('Run System Check', 'runSystemCheck')
-      .addItem('Open Diagnostics', 'openDiagnostics');
+      .addItem('Open Diagnostics', 'openDiagnostics')
+      .addItem('Open AI Diagnostics', 'openAIDiagnostics')
+      .addItem('Generate AI Perf Packet', 'generateAIPerfPacket');
   }
 
   menu.addToUi();
@@ -2019,28 +3014,29 @@ function applyWorkspaceView_(ss, mode, options) {
   const opts = options || {};
   const targetMode = parseEnumWithFallback_(mode, CONFIG.workspaceModes, 'STANDARD');
   const showForStandard = {
-    'Daily Home': true,
-    'Instructions': true,
+    'Home': true,
+    'Start Here': true,
     'Treez Valuation (Raw)': true,
-    'Restock Checklist': true,
-    'No_Reserve_Risk': true,
-    'Missing_Compliance': true
+    'Restock List': true,
+    'Backstock Alerts': true,
+    'Compliance Alerts': true
   };
   const managerOnlySheets = {
     'Restock Settings': true,
-    'Data Exceptions': true,
+    'Data Watchlist': true,
     'Compliance Config': true,
-    'Compliance Log': true,
+    'Compliance History': true,
     'System_Reference': true,
-    'System_Diagnostics': true
+    'System_Diagnostics': true,
+    'AI_Diagnostics': true
   };
   const alwaysHidden = {
     'Restock Engine (Internal)': true
   };
 
   const activeSheet = ss.getActiveSheet();
-  if (targetMode === 'STANDARD' && activeSheet && !showForStandard[activeSheet.getName()]) {
-    const homeSheet = ss.getSheetByName('Daily Home');
+  if (targetMode === 'STANDARD' && activeSheet && !showForStandard[preferredTabName_(activeSheet.getName())]) {
+    const homeSheet = getSheetByCompatName_(ss, 'Home');
     if (homeSheet) {
       ss.setActiveSheet(homeSheet);
     }
@@ -2049,7 +3045,7 @@ function applyWorkspaceView_(ss, mode, options) {
   const sheets = ss.getSheets();
   for (let i = 0; i < sheets.length; i++) {
     const sheet = sheets[i];
-    const name = sheet.getName();
+    const name = preferredTabName_(sheet.getName());
 
     if (alwaysHidden[name]) {
       sheet.hideSheet();
@@ -2084,11 +3080,119 @@ function openDiagnostics() {
   }
 }
 
+function openAIDiagnostics() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  ensureAIDiagnosticsTab_(ss);
+  const sheet = ss.getSheetByName(AI_DIAGNOSTICS.sheetName);
+  if (sheet) {
+    sheet.showSheet();
+    ss.setActiveSheet(sheet);
+  }
+}
+
+function generateAIPerfPacket() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  ensureAIDiagnosticsTab_(ss);
+  const sheet = ss.getSheetByName(AI_DIAGNOSTICS.sheetName);
+  const ui = SpreadsheetApp.getUi();
+  if (!sheet) {
+    ui.alert('AI diagnostics tab not found.');
+    return { ok: false, reason: 'MISSING_AI_DIAGNOSTICS' };
+  }
+
+  const summaryRows = readAITableRows_(sheet, AI_DIAGNOSTICS.runSummaryStartCol, AI_DIAGNOSTICS.runSummaryHeaders.length);
+  if (summaryRows.length === 0) {
+    ui.alert('No AI diagnostics runs available yet.');
+    return { ok: false, reason: 'NO_RUNS' };
+  }
+  const latest = summaryRows[summaryRows.length - 1];
+
+  const queueRows = readAITableRows_(sheet, AI_DIAGNOSTICS.queueHealthStartCol, AI_DIAGNOSTICS.queueHealthHeaders.length);
+  let latestQueue = null;
+  if (queueRows.length > 0) {
+    latestQueue = queueRows[queueRows.length - 1];
+  }
+
+  const stageRows = readAITableRows_(sheet, AI_DIAGNOSTICS.stageStepsStartCol, AI_DIAGNOSTICS.stageStepHeaders.length);
+  const latestRunId = String(latest[0] || '').trim();
+  const latestRunSteps = [];
+  for (let i = 0; i < stageRows.length; i++) {
+    const row = stageRows[i];
+    if (String(row[0] || '').trim() !== latestRunId) continue;
+    const stepName = String(row[4] || '').trim();
+    if (!stepName || stepName === '__unaccounted__') continue;
+    latestRunSteps.push({
+      stage: String(row[3] || ''),
+      step: stepName,
+      durationMs: parseInt(row[5], 10) || 0
+    });
+  }
+  latestRunSteps.sort(function(a, b) {
+    return b.durationMs - a.durationMs;
+  });
+
+  const hotspotRows = sheet.getRange(2, AI_DIAGNOSTICS.hotspotsStartCol, 5, AI_DIAGNOSTICS.hotspotsHeaders.length).getDisplayValues();
+  const hotspotLines = [];
+  for (let i = 0; i < hotspotRows.length; i++) {
+    const row = hotspotRows[i];
+    if (!String(row[0] || '').trim()) continue;
+    hotspotLines.push((i + 1) + '. ' + row[0] + ' :: ' + row[1] + ' | avg=' + row[2] + 'ms | max=' + row[3] + 'ms | n=' + row[4]);
+  }
+
+  const packetLines = [];
+  packetLines.push('AI PERF PACKET');
+  packetLines.push('Run ID: ' + latest[0]);
+  packetLines.push('Profile: ' + latest[5] + ' | Source: ' + latest[4]);
+  packetLines.push('Outcome: ' + latest[7] + ' | Duration: ' + latest[3] + ' ms | Perf Warn: ' + latest[10]);
+  packetLines.push('Signature: ' + latest[6]);
+  packetLines.push('Stage totals (ms): profile_resolve=' + latest[17] + ', schema_gate=' + latest[18] + ', location_sync=' + latest[19] + ', preflight=' + latest[20] + ', checklist=' + latest[21] + ', compliance=' + latest[22] + ', finalize=' + latest[23] + ', other=' + latest[24]);
+  packetLines.push('Counts: checklist_rows=' + latest[11] + ', no_reserve_rows=' + latest[12] + ', compliance_flagged=' + latest[13]);
+  if (latestQueue) {
+    packetLines.push('Queue health: true_unmapped=' + latestQueue[3] + ', mapped_ignore=' + latestQueue[4] + ', resolved_closed=' + latestQueue[5] + ', open_queue=' + latestQueue[6]);
+    if (String(latestQueue[7] || '').trim()) {
+      packetLines.push('Unknown locations: ' + latestQueue[7]);
+    }
+  }
+  packetLines.push('Top stage/step timings (latest run):');
+  if (latestRunSteps.length === 0) {
+    packetLines.push('1. No step-level rows for latest run.');
+  } else {
+    const maxSteps = Math.min(5, latestRunSteps.length);
+    for (let i = 0; i < maxSteps; i++) {
+      const item = latestRunSteps[i];
+      packetLines.push((i + 1) + '. ' + item.stage + ' :: ' + item.step + ' = ' + item.durationMs + 'ms');
+    }
+  }
+  packetLines.push('Top hotspots (last 30 runs):');
+  if (hotspotLines.length === 0) {
+    packetLines.push('1. No hotspot data yet.');
+  } else {
+    for (let i = 0; i < hotspotLines.length; i++) {
+      packetLines.push(hotspotLines[i]);
+    }
+  }
+
+  const packetText = packetLines.join('\n');
+  const packetCell = sheet.getRange(AI_DIAGNOSTICS.perfPacketCell);
+  packetCell.setValue(packetText);
+  packetCell.setWrap(true);
+  sheet.showSheet();
+  ss.setActiveSheet(sheet);
+
+  ui.alert('AI Perf Packet generated in ' + AI_DIAGNOSTICS.sheetName + '!' + AI_DIAGNOSTICS.perfPacketCell + '.');
+  return {
+    ok: true,
+    runId: latest[0],
+    profileId: latest[5]
+  };
+}
+
 function runSystemCheck() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const ui = SpreadsheetApp.getUi();
   ensureDailyHomeTab_(ss);
   ensureSystemDiagnosticsTab_(ss);
+  ensureAIDiagnosticsTab_(ss);
 
   const checks = [];
   const triggerStatus = getTriggerStatus_(ss);
@@ -2118,7 +3222,15 @@ function runSystemCheck() {
     : 'Schema: BLOCKED - ' + schemaGate.blockingIssues.join(' | ');
   checks.push(schemaLine);
 
-  const diagnosticsWritable = 'OK';
+  let diagnosticsWritable = 'OK';
+  try {
+    const systemSheet = getSystemDiagnosticsSheet_(ss);
+    const aiSheet = getAIDiagnosticsSheet_(ss);
+    systemSheet.getRange('A1').getDisplayValue();
+    aiSheet.getRange('A1').getDisplayValue();
+  } catch (diagError) {
+    diagnosticsWritable = 'ERROR_' + String(diagError);
+  }
   checks.push('Diagnostics writable: ' + diagnosticsWritable);
 
   const props = PropertiesService.getDocumentProperties();
@@ -2133,14 +3245,16 @@ function runSystemCheck() {
     unknownQueueOpen: countOpenUnknownLocationQueue_(ss)
   });
 
-  const severity = (!schemaGate.ok || configIntegrity !== 'OK') ? 'ERROR' : (triggerStatus === 'ACTIVE' ? 'INFO' : 'WARN');
+  const diagnosticsOk = diagnosticsWritable === 'OK';
+  const severity = (!schemaGate.ok || configIntegrity !== 'OK' || !diagnosticsOk) ? 'ERROR' : (triggerStatus === 'ACTIVE' ? 'INFO' : 'WARN');
   appendHealthEvent_(ss, 'SYSTEM_CHECK', severity, '', checks.join(' ; '));
 
   ui.alert('System Check\n\n' + checks.join('\n'));
   return {
-    ok: schemaGate.ok && configIntegrity === 'OK',
+    ok: schemaGate.ok && configIntegrity === 'OK' && diagnosticsWritable === 'OK',
     triggerStatus: triggerStatus,
     configIntegrity: configIntegrity,
+    diagnosticsWritable: diagnosticsWritable,
     schemaGate: schemaGate
   };
 }
@@ -2162,8 +3276,8 @@ function clearImportData() {
     }
   }
   
-  // Clear Restock Checklist - data starts at row 3
-  const checklistSheet = ss.getSheetByName('Restock Checklist');
+  // Clear Restock List - data starts at row 3
+  const checklistSheet = getSheetByCompatName_(ss, 'Restock List');
   if (checklistSheet) {
     const previousRows = parseInt(props.getProperty(SYSTEM_REFERENCE.props.lastChecklistRows) || '0', 10);
     const clearRows = Math.max(200, isNaN(previousRows) ? 0 : previousRows);
@@ -2185,7 +3299,11 @@ function clearImportData() {
   props.deleteProperty(SYSTEM_REFERENCE.props.lastImportSignature);
   props.deleteProperty(SYSTEM_REFERENCE.props.lastImportRunTs);
   props.deleteProperty(SYSTEM_REFERENCE.props.complianceHighlightRows);
+  props.deleteProperty(SYSTEM_REFERENCE.props.complianceHighlightHash);
+  props.deleteProperty(SYSTEM_REFERENCE.props.complianceSnapshotHash);
   props.deleteProperty(SYSTEM_REFERENCE.props.lastChecklistRows);
+  props.deleteProperty(SYSTEM_REFERENCE.props.lastChecklistRawSignature);
+  props.deleteProperty(SYSTEM_REFERENCE.props.lastChecklistRulesSignature);
   props.deleteProperty(SYSTEM_REFERENCE.props.runInProgress);
   props.deleteProperty(SYSTEM_REFERENCE.props.lastSuccessSignature);
   props.deleteProperty(SYSTEM_REFERENCE.props.lastRunId);
@@ -2215,9 +3333,11 @@ function createAllTabs(ss) {
   // Create tabs in reverse order (they get inserted at position 0)
   for (let i = CONFIG.tabs.length - 1; i >= 0; i--) {
     const tabName = CONFIG.tabs[i];
-    let sheet = ss.getSheetByName(tabName);
+    let sheet = getSheetByCompatName_(ss, tabName);
     if (!sheet) {
-      sheet = ss.insertSheet(tabName, 0);
+      sheet = ensureSheetByCompatName_(ss, tabName, 0);
+    } else if (sheet.getName() !== tabName && !ss.getSheetByName(tabName)) {
+      sheet.setName(tabName);
     }
   }
   
@@ -2229,7 +3349,7 @@ function createAllTabs(ss) {
   
   // Reorder tabs
   for (let i = 0; i < CONFIG.tabs.length; i++) {
-    const sheet = ss.getSheetByName(CONFIG.tabs[i]);
+    const sheet = getSheetByCompatName_(ss, CONFIG.tabs[i]);
     if (sheet) {
       ss.setActiveSheet(sheet);
       ss.moveActiveSheet(i + 1);
@@ -2242,10 +3362,10 @@ function createAllTabs(ss) {
 // ============================================================================
 
 function setupDailyHomeTab(ss) {
-  const sheet = ss.getSheetByName('Daily Home');
+  const sheet = ensureSheetByCompatName_(ss, 'Home');
   sheet.clear();
 
-  sheet.getRange('A1').setValue('VAULT RESTOCK DAILY HOME').setFontSize(18).setFontWeight('bold');
+  sheet.getRange('A1').setValue('VAULT RESTOCK HOME').setFontSize(18).setFontWeight('bold');
   sheet.getRange('A2').setValue('One primary action: Restock -> Run Daily Update');
   sheet.getRange('A2').setBackground(CONFIG.colors.instructionBg);
 
@@ -2253,9 +3373,9 @@ function setupDailyHomeTab(ss) {
   const workflow = [
     ['1. Import Treez CSV into "Treez Valuation (Raw)" at A6'],
     ['2. Run Restock -> Run Daily Update'],
-    ['3. Review "No_Reserve_Risk" first'],
-    ['4. Work "Restock Checklist"'],
-    ['5. Resolve "Missing_Compliance" issues']
+    ['3. Review "Backstock Alerts" first'],
+    ['4. Work "Restock List"'],
+    ['5. Resolve "Compliance Alerts" issues']
   ];
   sheet.getRange(5, 1, workflow.length, 1).setValues(workflow);
 
@@ -2265,7 +3385,7 @@ function setupDailyHomeTab(ss) {
     ['Last Run Timestamp'],
     ['Active Profile'],
     ['Checklist Rows'],
-    ['No Reserve Risk Rows'],
+    ['Backstock Alerts Rows'],
     ['Compliance Issues'],
     ['Unknown Locations Queued'],
     ['Next Step']
@@ -2275,9 +3395,9 @@ function setupDailyHomeTab(ss) {
 
   sheet.getRange('A22').setValue('Quick Open').setFontSize(13).setFontWeight('bold');
   const quickOpenRows = [
-    ['Restock Checklist', buildSheetLinkFormula_(ss, 'Restock Checklist', 'Open Restock Checklist')],
-    ['No Reserve Risk', buildSheetLinkFormula_(ss, 'No_Reserve_Risk', 'Open No Reserve Risk')],
-    ['Compliance Issues', buildSheetLinkFormula_(ss, 'Missing_Compliance', 'Open Compliance Issues')],
+    ['Restock List', buildSheetLinkFormula_(ss, 'Restock List', 'Open Restock List')],
+    ['Backstock Alerts', buildSheetLinkFormula_(ss, 'Backstock Alerts', 'Open Backstock Alerts')],
+    ['Compliance Alerts', buildSheetLinkFormula_(ss, 'Compliance Alerts', 'Open Compliance Alerts')],
     ['Raw Import', buildSheetLinkFormula_(ss, 'Treez Valuation (Raw)', 'Open Raw Import')],
     ['Diagnostics (Manager)', buildSheetLinkFormula_(ss, DIAGNOSTICS.sheetName, 'Open Diagnostics')]
   ];
@@ -2298,6 +3418,14 @@ function setupDailyHomeTab(ss) {
   ];
   sheet.getRange(33, 1, healthLabels.length, 1).setValues(healthLabels).setFontWeight('bold');
 
+  sheet.getRange('A40').setValue('Trust and Escalation').setFontSize(12).setFontWeight('bold');
+  const trustLines = [
+    ['Decision transparency: checklist and compliance outputs are generated from current import data, active profile mapping, and configured rules.'],
+    ['Manager authority: managers can override operational execution decisions and update profile/location configuration when reality changes.'],
+    ['Escalation location: if a run is blocked or fails, open Diagnostics and follow Manager Runbooks from docs/managers and docs/runbooks.']
+  ];
+  sheet.getRange(41, 1, trustLines.length, 1).setValues(trustLines).setWrap(true);
+
   sheet.setColumnWidth(1, 270);
   sheet.setColumnWidth(2, 420);
   sheet.setFrozenRows(3);
@@ -2305,7 +3433,7 @@ function setupDailyHomeTab(ss) {
 }
 
 function updateDailyHomeSummary_(ss, payload) {
-  const sheet = ss.getSheetByName('Daily Home');
+  const sheet = getSheetByCompatName_(ss, 'Home');
   if (!sheet) return;
 
   const data = payload || {};
@@ -2348,7 +3476,7 @@ function resetDailyHomeSummary_(ss) {
 }
 
 function updateDailyHomeHealth_(ss, payload) {
-  const sheet = ss.getSheetByName('Daily Home');
+  const sheet = getSheetByCompatName_(ss, 'Home');
   if (!sheet) return;
 
   const data = payload || {};
@@ -2397,7 +3525,7 @@ function refreshDailyHomeHealthFromState_(ss) {
 }
 
 function buildSheetLinkFormula_(ss, sheetName, label) {
-  const sheet = ss.getSheetByName(sheetName);
+  const sheet = getSheetByCompatName_(ss, sheetName);
   if (!sheet) return label;
   return '=HYPERLINK("#gid=' + sheet.getSheetId() + '","' + label + '")';
 }
@@ -2405,7 +3533,7 @@ function buildSheetLinkFormula_(ss, sheetName, label) {
 function openDailyHome() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   ensureDailyHomeTab_(ss);
-  const sheet = ss.getSheetByName('Daily Home');
+  const sheet = getSheetByCompatName_(ss, 'Home');
   if (sheet) {
     ss.setActiveSheet(sheet);
   }
@@ -2416,44 +3544,47 @@ function openDailyHome() {
 // ============================================================================
 
 function setupInstructionsTab(ss) {
-  const sheet = ss.getSheetByName('Instructions');
+  const sheet = ensureSheetByCompatName_(ss, 'Start Here');
   sheet.clear();
   
   const instructions = [
-    ['VAULT RESTOCK SYSTEM - INSTRUCTIONS'],
+    ['VAULT RESTOCK SYSTEM - START HERE'],
     [''],
     ['OVERVIEW'],
     ['This spreadsheet helps State of Mind vault staff manage daily restocking by:'],
-    ['• Analyzing the Treez Inventory Valuation export'],
-    ['• Identifying products that need restocking on the sales floor'],
-    ['• Calculating how many units to pull from backstock'],
-    ['• Showing exactly which bins/shelves to pull from (oldest inventory first)'],
+    ['- Analyzing the Treez Inventory Valuation export'],
+    ['- Identifying products that need restocking on the sales floor'],
+    ['- Calculating how many units to pull from backstock'],
+    ['- Showing exactly which bins/shelves to pull from (oldest inventory first)'],
+    ['- Decision transparency: output is based on current import data, active profile mapping, and configured rules.'],
+    ['- Manager authority: managers can override execution decisions and update mapping/configuration when needed.'],
+    ['- Escalation location: use Restock -> Open Diagnostics and manager runbooks for blocked or failed runs.'],
     [''],
     ['HOW TO USE (DAILY WORKFLOW)'],
     [''],
     ['Step 1: Export from Treez'],
-    ['  • Run the Inventory Valuation report in Treez'],
-    ['  • Export as CSV'],
+    ['  - Run the Inventory Valuation report in Treez'],
+    ['  - Export as CSV'],
     [''],
     ['Step 2: Import into this sheet'],
-    ['  • Go to the "Treez Valuation (Raw)" tab'],
-    ['  • Click on cell A6'],
-    ['  • Use File → Import → Upload, choose your CSV'],
-    ['  • Select "Replace data at selected cell"'],
+    ['  - Go to the "Treez Valuation (Raw)" tab'],
+    ['  - Click on cell A6'],
+    ['  - Use File -> Import -> Upload, choose your CSV'],
+    ['  - Select "Replace data at selected cell"'],
     [''],
     ['Step 3: Run Daily Update'],
-    ['  • Go to "Daily Home" for run summary and quick links'],
-    ['  • Click Restock -> Run Daily Update from the menu bar'],
-    ['  • Wait for checklist and compliance confirmation'],
+    ['  - Go to "Home" for run summary and quick links'],
+    ['  - Click Restock -> Run Daily Update from the menu bar'],
+    ['  - Wait for checklist and compliance confirmation'],
     [''],
-    ['Step 4: Check No Reserve Risk'],
-    ['  • Go to the "No_Reserve_Risk" tab first'],
-    ['  • Prioritize immediate reorder/transfer decisions for critical zero-reserve items'],
+    ['Step 4: Check Backstock Alerts'],
+    ['  - Go to the "Backstock Alerts" tab first'],
+    ['  - Prioritize immediate reorder/transfer decisions for critical zero-reserve items'],
     [''],
-    ['Step 5: Work the Restock Checklist'],
-    ['  • Go to the "Restock Checklist" tab'],
-    ['  • Work Critical (red) items first, then Soon (amber), then Low (green)'],
-    ['  • For each item:'],
+    ['Step 5: Work the Restock List'],
+    ['  - Go to the "Restock List" tab'],
+    ['  - Work Critical (red) items first, then Soon (amber), then Low (green)'],
+    ['  - For each item:'],
     ['    - Check "First Pull From" for location and quantity'],
     ['    - Pull units and bring to sales floor'],
     ['    - Enter actual units pulled in "Pull" column'],
@@ -2474,9 +3605,9 @@ function setupInstructionsTab(ss) {
     ['Restock -> Reset to Defaults - Rebuild entire system (rarely needed)'],
     [''],
     ['URGENCY COLORS'],
-    ['• RED = Critical (0-2 on shelf) - Restock immediately'],
-    ['• AMBER = Soon (3-4 on shelf) - Restock today'],
-    ['• GREEN = Low (5-6 on shelf) - Restock when convenient'],
+    ['- RED = Critical (0-2 on shelf) - Restock immediately'],
+    ['- AMBER = Soon (3-4 on shelf) - Restock today'],
+    ['- GREEN = Low (5-6 on shelf) - Restock when convenient'],
     [''],
     ['NOTE: Some columns are hidden by default for a cleaner view.'],
     ['Right-click column headers to unhide if needed.'],
@@ -2520,9 +3651,9 @@ function setupTreezValuationTab(ss) {
     [''],
     ['Instructions:'],
     ['1. Export the Inventory Valuation report from Treez as a CSV'],
-    ['2. Click on cell A6 below, then use File → Import → Upload'],
+    ['2. Click on cell A6 below, then use File -> Import -> Upload'],
     ['3. Choose "Replace data at selected cell" in the import options'],
-    ['4. After import, go to "Daily Home" then run Restock -> Run Daily Update'],
+    ['4. After import, go to "Home" then run Restock -> Run Daily Update'],
     ['']
   ];
   
@@ -2614,7 +3745,7 @@ function setupSystemDiagnosticsTab(ss) {
   sheet.getRange(1, 14, 1, DIAGNOSTICS.healthEventHeaders.length).setFontWeight('bold').setBackground(CONFIG.colors.header);
 
   sheet.getRange('A2').setValue('Run journal is append-only. Do not edit rows manually.');
-  sheet.getRange('N2').setValue('Health events capture guardrail/performance signals.');
+  sheet.getRange('N2').setValue('Health events capture guardrail, performance, stage, and progress signals.');
   sheet.getRange('A2').setFontColor('#666666');
   sheet.getRange('N2').setFontColor('#666666');
 
@@ -2637,6 +3768,323 @@ function setupSystemDiagnosticsTab(ss) {
   sheet.setColumnWidth(17, 95);
   sheet.setColumnWidth(18, 520);
   sheet.setFrozenRows(1);
+}
+
+function getAIDiagnosticsSheet_(ss) {
+  let sheet = ss.getSheetByName(AI_DIAGNOSTICS.sheetName);
+  if (!sheet) {
+    sheet = ss.insertSheet(AI_DIAGNOSTICS.sheetName);
+    setupAIDiagnosticsTab(ss);
+    sheet = ss.getSheetByName(AI_DIAGNOSTICS.sheetName);
+  }
+  return sheet;
+}
+
+function setupAIDiagnosticsTab(ss) {
+  const sheet = ss.getSheetByName(AI_DIAGNOSTICS.sheetName);
+  if (!sheet) return;
+  sheet.clear();
+
+  sheet.getRange(1, AI_DIAGNOSTICS.runSummaryStartCol, 1, AI_DIAGNOSTICS.runSummaryHeaders.length)
+    .setValues([AI_DIAGNOSTICS.runSummaryHeaders])
+    .setFontWeight('bold')
+    .setBackground(CONFIG.colors.header);
+  sheet.getRange(1, AI_DIAGNOSTICS.stageStepsStartCol, 1, AI_DIAGNOSTICS.stageStepHeaders.length)
+    .setValues([AI_DIAGNOSTICS.stageStepHeaders])
+    .setFontWeight('bold')
+    .setBackground(CONFIG.colors.header);
+  sheet.getRange(1, AI_DIAGNOSTICS.queueHealthStartCol, 1, AI_DIAGNOSTICS.queueHealthHeaders.length)
+    .setValues([AI_DIAGNOSTICS.queueHealthHeaders])
+    .setFontWeight('bold')
+    .setBackground(CONFIG.colors.header);
+  sheet.getRange(1, AI_DIAGNOSTICS.hotspotsStartCol, 1, AI_DIAGNOSTICS.hotspotsHeaders.length)
+    .setValues([AI_DIAGNOSTICS.hotspotsHeaders])
+    .setFontWeight('bold')
+    .setBackground(CONFIG.colors.header);
+
+  const stageStart = columnToLetter_(AI_DIAGNOSTICS.stageStepsStartCol);
+  const stageEnd = columnToLetter_(AI_DIAGNOSTICS.stageStepsStartCol + AI_DIAGNOSTICS.stageStepHeaders.length - 1);
+  sheet.getRange(2, AI_DIAGNOSTICS.hotspotsStartCol).setFormula(
+    '=IFERROR(QUERY(' + stageStart + '2:' + stageEnd + ',"select Col4,Col5,avg(Col6),max(Col6),count(Col6) where Col1 is not null and Col6 > 0 group by Col4,Col5 order by avg(Col6) desc limit 15",0),{"","","","",""})'
+  );
+
+  sheet.getRange('BJ22').setValue('AI Perf Packet (copy this block)').setFontWeight('bold');
+  sheet.getRange(AI_DIAGNOSTICS.perfPacketCell).setValue('Run "Restock -> Generate AI Perf Packet".');
+  sheet.getRange(AI_DIAGNOSTICS.perfPacketCell).setWrap(true);
+
+  const runSummaryWidths = [180, 160, 160, 105, 105, 95, 220, 150, 165, 95, 80, 105, 120, 120, 120, 120, 120, 115, 110, 120, 105, 105, 115, 95, 95];
+  for (let i = 0; i < runSummaryWidths.length; i++) {
+    sheet.setColumnWidth(AI_DIAGNOSTICS.runSummaryStartCol + i, runSummaryWidths[i]);
+  }
+  for (let i = 0; i < AI_DIAGNOSTICS.stageStepHeaders.length; i++) {
+    let width = i < 6 ? 120 : 105;
+    if (i === 3 || i === 4) width = 130; // stage + step
+    if (i === 17) width = 360; // detail_json
+    sheet.setColumnWidth(AI_DIAGNOSTICS.stageStepsStartCol + i, width);
+  }
+  for (let i = 0; i < AI_DIAGNOSTICS.queueHealthHeaders.length; i++) {
+    sheet.setColumnWidth(AI_DIAGNOSTICS.queueHealthStartCol + i, i === 7 ? 260 : 120);
+  }
+  for (let i = 0; i < AI_DIAGNOSTICS.hotspotsHeaders.length; i++) {
+    sheet.setColumnWidth(AI_DIAGNOSTICS.hotspotsStartCol + i, 140);
+  }
+  sheet.setColumnWidth(columnToNumber_('BJ'), 540);
+  sheet.setFrozenRows(1);
+}
+
+function columnToNumber_(letters) {
+  const text = String(letters || '').toUpperCase().trim();
+  if (!text) return 1;
+  let out = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 65 || code > 90) continue;
+    out = (out * 26) + (code - 64);
+  }
+  return Math.max(1, out);
+}
+
+function safeJson_(value) {
+  try {
+    return JSON.stringify(value);
+  } catch (error) {
+    return String(value || '');
+  }
+}
+
+function truncateText_(value, maxLen) {
+  const text = String(value || '');
+  const limit = Math.max(1, parseInt(maxLen, 10) || 0);
+  if (!limit || text.length <= limit) return text;
+  return text.slice(0, limit - 14) + '...[truncated]';
+}
+
+function readAITableRows_(sheet, startCol, width) {
+  if (!sheet) return [];
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  const values = sheet.getRange(2, startCol, lastRow - 1, width).getValues();
+  const rows = [];
+  for (let i = 0; i < values.length; i++) {
+    if (String(values[i][0] || '').trim() === '') continue;
+    rows.push(values[i]);
+  }
+  return rows;
+}
+
+function getAITableLastDataRow_(sheet, startCol) {
+  if (!sheet) return 1;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 1;
+  const values = sheet.getRange(2, startCol, lastRow - 1, 1).getDisplayValues();
+  for (let i = values.length - 1; i >= 0; i--) {
+    if (String(values[i][0] || '').trim() !== '') {
+      return i + 2;
+    }
+  }
+  return 1;
+}
+
+function writeAITableRows_(sheet, startCol, width, rows) {
+  const lastDataRow = getAITableLastDataRow_(sheet, startCol);
+  const clearRows = Math.max(rows.length, Math.max(0, lastDataRow - 1));
+  if (clearRows > 0) {
+    sheet.getRange(2, startCol, clearRows, width).clearContent();
+  }
+  if (rows.length > 0) {
+    sheet.getRange(2, startCol, rows.length, width).setValues(rows);
+  }
+}
+
+function sortStageNamesForSummary_(stageDurations) {
+  const order = {
+    profile_resolve: 1,
+    schema_gate: 2,
+    location_sync: 3,
+    preflight: 4,
+    checklist: 5,
+    compliance: 6,
+    finalize: 7
+  };
+  return Object.keys(stageDurations || {}).sort(function(a, b) {
+    const rankA = order[a] || 99;
+    const rankB = order[b] || 99;
+    if (rankA !== rankB) return rankA - rankB;
+    return a < b ? -1 : (a > b ? 1 : 0);
+  });
+}
+
+function buildAIDiagnosticsRows_(runCtx) {
+  const stageDur = runCtx.stageDurations || {};
+  const summaryRow = [
+    runCtx.runId,
+    runCtx.startedAt,
+    runCtx.endedAt,
+    runCtx.durationMs,
+    runCtx.source,
+    runCtx.profileId,
+    runCtx.signature,
+    runCtx.outcome,
+    runCtx.errorCode,
+    runCtx.warningCount,
+    runCtx.perfWarn === true,
+    runCtx.checklistRows,
+    runCtx.noReserveRows,
+    runCtx.complianceFlagged,
+    runCtx.queueHealth.trueUnmappedCount || 0,
+    runCtx.queueHealth.mappedIgnoreCount || 0,
+    runCtx.queueHealth.resolvedClosedCount || 0,
+    stageDur.profile_resolve || 0,
+    stageDur.schema_gate || 0,
+    stageDur.location_sync || 0,
+    stageDur.preflight || 0,
+    stageDur.checklist || 0,
+    stageDur.compliance || 0,
+    stageDur.finalize || 0,
+    getStageOtherDurationMs_(runCtx)
+  ];
+
+  const stageRows = [];
+  const stageNames = sortStageNamesForSummary_(stageDur);
+  for (let i = 0; i < stageNames.length; i++) {
+    const stageName = stageNames[i];
+    const stageDurationMs = parseInt(stageDur[stageName], 10) || 0;
+    const stepDur = runCtx.stageStepDurations[stageName] || {};
+    const counters = runCtx.stageCounters[stageName] || {};
+    const stepKeys = Object.keys(stepDur);
+    let accounted = 0;
+
+    for (let j = 0; j < stepKeys.length; j++) {
+      const step = stepKeys[j];
+      const durationMs = Math.max(0, parseInt(stepDur[step], 10) || 0);
+      accounted += durationMs;
+      stageRows.push([
+        runCtx.runId,
+        runCtx.profileId,
+        runCtx.source,
+        stageName,
+        step,
+        durationMs,
+        stageDurationMs,
+        0,
+        counters.apiReadCalls || 0,
+        counters.apiWriteCalls || 0,
+        counters.rowsTotal || counters.dataRowsInRaw || counters.rowsScanned || 0,
+        counters.rowsChanged || 0,
+        counters.readStrategy || counters.strategy || '',
+        counters.segmentCount || 0,
+        counters.spanWidth || 0,
+        counters.checkpointsLogged || counters.warningCount || 0,
+        counters.requiredIndexCount || counters.requiredIndexes || 0,
+        truncateText_(safeJson_(counters), 1800),
+        runCtx.endedAt || new Date()
+      ]);
+    }
+
+    const unaccounted = Math.max(0, stageDurationMs - accounted);
+    stageRows.push([
+      runCtx.runId,
+      runCtx.profileId,
+      runCtx.source,
+      stageName,
+      '__unaccounted__',
+      unaccounted,
+      stageDurationMs,
+      unaccounted,
+      counters.apiReadCalls || 0,
+      counters.apiWriteCalls || 0,
+      counters.rowsTotal || counters.dataRowsInRaw || counters.rowsScanned || 0,
+      counters.rowsChanged || 0,
+      counters.readStrategy || counters.strategy || '',
+      counters.segmentCount || 0,
+      counters.spanWidth || 0,
+      0,
+      0,
+      'stage_duration_ms=' + stageDurationMs + '; accounted_ms=' + accounted,
+      runCtx.endedAt || new Date()
+    ]);
+  }
+
+  const queueRow = [
+    runCtx.runId,
+    runCtx.profileId,
+    runCtx.source,
+    runCtx.queueHealth.trueUnmappedCount || 0,
+    runCtx.queueHealth.mappedIgnoreCount || 0,
+    runCtx.queueHealth.resolvedClosedCount || 0,
+    runCtx.queueHealth.openQueueCount || 0,
+    runCtx.queueHealth.unknownLocationsCsv || '',
+    runCtx.endedAt || new Date()
+  ];
+
+  return {
+    runSummaryRow: summaryRow,
+    stageRows: stageRows,
+    queueRow: queueRow
+  };
+}
+
+function pruneAIDiagnosticsRows_(runSummaryRows, stageRows, queueRows, maxRuns) {
+  const keep = Math.max(1, parseInt(maxRuns, 10) || AI_DIAGNOSTICS.runRetention);
+  if (runSummaryRows.length <= keep) {
+    return {
+      runSummaryRows: runSummaryRows,
+      stageRows: stageRows,
+      queueRows: queueRows
+    };
+  }
+
+  const trimmedSummary = runSummaryRows.slice(runSummaryRows.length - keep);
+  const keepMap = {};
+  for (let i = 0; i < trimmedSummary.length; i++) {
+    const runId = String(trimmedSummary[i][0] || '').trim();
+    if (runId) keepMap[runId] = true;
+  }
+
+  const trimmedStage = [];
+  for (let i = 0; i < stageRows.length; i++) {
+    const runId = String(stageRows[i][0] || '').trim();
+    if (!runId || !keepMap[runId]) continue;
+    trimmedStage.push(stageRows[i]);
+  }
+
+  const trimmedQueue = [];
+  for (let i = 0; i < queueRows.length; i++) {
+    const runId = String(queueRows[i][0] || '').trim();
+    if (!runId || !keepMap[runId]) continue;
+    trimmedQueue.push(queueRows[i]);
+  }
+
+  return {
+    runSummaryRows: trimmedSummary,
+    stageRows: trimmedStage,
+    queueRows: trimmedQueue
+  };
+}
+
+function appendAIDiagnostics_(ss, runCtx) {
+  const sheet = getAIDiagnosticsSheet_(ss);
+  const built = buildAIDiagnosticsRows_(runCtx);
+
+  const summaryRows = readAITableRows_(sheet, AI_DIAGNOSTICS.runSummaryStartCol, AI_DIAGNOSTICS.runSummaryHeaders.length);
+  const stageRows = readAITableRows_(sheet, AI_DIAGNOSTICS.stageStepsStartCol, AI_DIAGNOSTICS.stageStepHeaders.length);
+  const queueRows = readAITableRows_(sheet, AI_DIAGNOSTICS.queueHealthStartCol, AI_DIAGNOSTICS.queueHealthHeaders.length);
+
+  summaryRows.push(built.runSummaryRow);
+  for (let i = 0; i < built.stageRows.length; i++) {
+    stageRows.push(built.stageRows[i]);
+  }
+  queueRows.push(built.queueRow);
+
+  const pruned = pruneAIDiagnosticsRows_(summaryRows, stageRows, queueRows, AI_DIAGNOSTICS.runRetention);
+  writeAITableRows_(sheet, AI_DIAGNOSTICS.runSummaryStartCol, AI_DIAGNOSTICS.runSummaryHeaders.length, pruned.runSummaryRows);
+  writeAITableRows_(sheet, AI_DIAGNOSTICS.stageStepsStartCol, AI_DIAGNOSTICS.stageStepHeaders.length, pruned.stageRows);
+  writeAITableRows_(sheet, AI_DIAGNOSTICS.queueHealthStartCol, AI_DIAGNOSTICS.queueHealthHeaders.length, pruned.queueRows);
+
+  const packetCell = sheet.getRange(AI_DIAGNOSTICS.perfPacketCell);
+  if (!packetCell.getValue()) {
+    packetCell.setValue('Run "Restock -> Generate AI Perf Packet".');
+  }
 }
 
 function buildDefaultLocationProfileRows_() {
@@ -2786,23 +4234,29 @@ function resolveActiveStoreProfile_(ss, options) {
 
   if (opts.useRawData !== false) {
     const props = PropertiesService.getDocumentProperties();
-    const signature = computeRawImportSignature_(ss);
+    const signature = String(opts.signature || computeRawImportSignature_(ss) || '');
+    const signatureLicense = getLicenseTokenFromSignature_(signature);
+    const signatureMatch = resolveProfileByLicenseToken_(profiles, signatureLicense);
+    if (signatureMatch) {
+      if (signature) {
+        props.setProperty(SYSTEM_REFERENCE.props.profileCacheSignature, signature);
+        props.setProperty(SYSTEM_REFERENCE.props.profileCacheProfileId, signatureMatch.profileId);
+      }
+      return buildResolvedProfileResult_(signatureMatch, 'signature', signatureLicense);
+    }
+
     const cachedSignature = props.getProperty(SYSTEM_REFERENCE.props.profileCacheSignature) || '';
     const cachedProfileId = props.getProperty(SYSTEM_REFERENCE.props.profileCacheProfileId) || '';
     if (signature && cachedSignature === signature && cachedProfileId) {
       const cachedProfile = profiles.find(p => p.profileId === cachedProfileId);
       if (cachedProfile) {
-        return {
-          profileId: cachedProfile.profileId,
-          storeName: cachedProfile.storeName,
-          source: 'cache',
-          receivingLicense: cachedProfile.receivingLicenseMatch,
-          autoRunEnabled: cachedProfile.autoRunEnabled
-        };
+        return buildResolvedProfileResult_(cachedProfile, 'cache', cachedProfile.receivingLicenseMatch);
       }
     }
 
-    const detected = detectProfileFromRaw_(ss, profiles);
+    const detected = detectProfileFromRaw_(ss, profiles, {
+      preferredLicense: signatureLicense
+    });
     if (detected) {
       if (signature) {
         props.setProperty(SYSTEM_REFERENCE.props.profileCacheSignature, signature);
@@ -2828,7 +4282,45 @@ function resolveActiveStoreProfile_(ss, options) {
   };
 }
 
-function detectProfileFromRaw_(ss, profiles) {
+function buildResolvedProfileResult_(profileRow, source, receivingLicense) {
+  if (!profileRow) return null;
+  return {
+    profileId: profileRow.profileId,
+    storeName: profileRow.storeName,
+    source: source || 'unknown',
+    receivingLicense: receivingLicense || profileRow.receivingLicenseMatch,
+    autoRunEnabled: profileRow.autoRunEnabled
+  };
+}
+
+function resolveProfileByLicenseToken_(profiles, licenseToken) {
+  const token = normalizeToken_(licenseToken);
+  if (!token) return null;
+  for (let i = 0; i < profiles.length; i++) {
+    const expected = normalizeToken_(profiles[i].receivingLicenseMatch);
+    if (expected && expected === token) {
+      return profiles[i];
+    }
+  }
+  return null;
+}
+
+function getLicenseTokenFromSignature_(signature) {
+  const parts = String(signature || '').split('|');
+  if (parts.length < 4) return '';
+  return normalizeToken_(parts[3]);
+}
+
+function detectProfileFromRaw_(ss, profiles, options) {
+  const opts = options || {};
+  const preferredLicense = normalizeToken_(opts.preferredLicense);
+  if (preferredLicense) {
+    const preferredMatch = resolveProfileByLicenseToken_(profiles, preferredLicense);
+    if (preferredMatch) {
+      return buildResolvedProfileResult_(preferredMatch, 'signature_hint', preferredLicense);
+    }
+  }
+
   const rawSheet = ss.getSheetByName('Treez Valuation (Raw)');
   if (!rawSheet) return null;
 
@@ -2837,6 +4329,12 @@ function detectProfileFromRaw_(ss, profiles) {
   const lastRow = rawSheet.getLastRow();
   const lastCol = rawSheet.getLastColumn();
   if (lastRow < dataStartRow || lastCol < 1) return null;
+
+  const sampleLicense = getQuickLicenseSignatureToken_(rawSheet, dataStartRow, lastRow, lastCol);
+  const sampleMatch = resolveProfileByLicenseToken_(profiles, sampleLicense);
+  if (sampleMatch) {
+    return buildResolvedProfileResult_(sampleMatch, 'detected_sample', sampleLicense);
+  }
 
   const headers = rawSheet.getRange(headerRow, 1, 1, lastCol).getDisplayValues()[0];
   let receivingLicenseCol = -1;
@@ -2860,19 +4358,10 @@ function detectProfileFromRaw_(ss, profiles) {
   if (sorted.length === 0) return null;
   const dominantLicense = sorted[0];
 
-  const match = profiles.find(p => {
-    const expected = String(p.receivingLicenseMatch || '').trim();
-    return expected && dominantLicense.toUpperCase() === expected.toUpperCase();
-  });
+  const match = resolveProfileByLicenseToken_(profiles, dominantLicense);
   if (!match) return null;
 
-  return {
-    profileId: match.profileId,
-    storeName: match.storeName,
-    source: 'detected',
-    receivingLicense: dominantLicense,
-    autoRunEnabled: match.autoRunEnabled
-  };
+  return buildResolvedProfileResult_(match, 'detected_dominant', dominantLicense);
 }
 
 function getLocationRolesForProfile_(ss, profileId) {
@@ -2880,11 +4369,23 @@ function getLocationRolesForProfile_(ss, profileId) {
   let locationRows = readLocationProfileMap_(ss)
     .filter(r => r.profileId === profileToken)
     .map(r => [r.locationName, r.role, r.includeInEngine, r.notes]);
+  const defaultRows = buildDefaultLocationProfileRows_()
+    .filter(r => String(r[0] || '').toUpperCase().trim() === profileToken)
+    .map(r => [r[1], r[2], r[3] === true, r[4] || '']);
 
   if (locationRows.length === 0) {
-    locationRows = buildDefaultLocationProfileRows_()
-      .filter(r => String(r[0] || '').toUpperCase().trim() === profileToken)
-      .map(r => [r[1], r[2], r[3] === true, r[4] || '']);
+    locationRows = defaultRows;
+  } else if (defaultRows.length > 0) {
+    const seen = {};
+    for (let i = 0; i < locationRows.length; i++) {
+      const key = normalizeToken_(locationRows[i][0]);
+      if (key) seen[key] = true;
+    }
+    for (let i = 0; i < defaultRows.length; i++) {
+      const key = normalizeToken_(defaultRows[i][0]);
+      if (!key || seen[key]) continue;
+      locationRows.push(defaultRows[i]);
+    }
   }
 
   return locationRows;
@@ -2894,47 +4395,96 @@ function syncLocationRolesForProfile_(ss, profileId, options) {
   const opts = options || {};
   const settingsSheet = ss.getSheetByName('Restock Settings');
   if (!settingsSheet) return { rowCount: 0 };
+  const stepDurations = {};
+  let rowsWritten = 0;
+  let checkboxRebuildPerformed = false;
+  let namedRangesUpdatedCount = 0;
 
-  const locStart = parseInt(settingsSheet.getRange('N1').getValue(), 10) || 5;
+  const locStart = runTimedStep_(stepDurations, 'read_loc_start', function() {
+    return parseInt(settingsSheet.getRange('N1').getValue(), 10) || 5;
+  });
+  const previousLocEnd = runTimedStep_(stepDurations, 'read_loc_end', function() {
+    return parseInt(settingsSheet.getRange('N2').getValue(), 10) || (locStart - 1);
+  });
   const maxRows = SYSTEM_REFERENCE.settingsLocationCapacity;
-  const profileRows = getLocationRolesForProfile_(ss, profileId).slice(0, maxRows).map(r => [
-    String(r[0] || '').trim(),
-    String(r[1] || 'IGNORE').toUpperCase().trim(),
-    r[2] === true,
-    String(r[3] || '')
-  ]);
+  const profileRows = runTimedStep_(stepDurations, 'load_profile_rows', function() {
+    return getLocationRolesForProfile_(ss, profileId).slice(0, maxRows).map(r => [
+      String(r[0] || '').trim(),
+      String(r[1] || 'IGNORE').toUpperCase().trim(),
+      r[2] === true,
+      String(r[3] || '')
+    ]);
+  });
   const expectedSignature = buildLocationRoleSignature_(profileId, profileRows);
-  const existingRows = readSettingsLocationRows_(settingsSheet, locStart, maxRows);
+  const existingRows = runTimedStep_(stepDurations, 'read_existing_rows', function() {
+    return readSettingsLocationRows_(settingsSheet, locStart, maxRows);
+  });
   const existingSignature = buildLocationRoleSignature_(profileId, existingRows);
   const shouldSkipWrite = !opts.force && expectedSignature === existingSignature;
 
   if (!shouldSkipWrite) {
-    settingsSheet.getRange(locStart, 1, maxRows, 4).clearContent();
-    if (profileRows.length > 0) {
-      settingsSheet.getRange(locStart, 1, profileRows.length, 4).setValues(profileRows);
-    }
+    runTimedStep_(stepDurations, 'write_location_rows', function() {
+      settingsSheet.getRange(locStart, 1, maxRows, 4).clearContent();
+      if (profileRows.length > 0) {
+        settingsSheet.getRange(locStart, 1, profileRows.length, 4).setValues(profileRows);
+        rowsWritten = profileRows.length;
+      }
+    });
 
-    const roleValidation = SpreadsheetApp.newDataValidation()
-      .requireValueInList(CONFIG.locationRoleOptions, true)
-      .setAllowInvalid(false)
-      .build();
-    settingsSheet.getRange(locStart, 2, maxRows, 1).setDataValidation(roleValidation);
+    runTimedStep_(stepDurations, 'apply_role_validation', function() {
+      const roleValidation = SpreadsheetApp.newDataValidation()
+        .requireValueInList(CONFIG.locationRoleOptions, true)
+        .setAllowInvalid(false)
+        .build();
+      settingsSheet.getRange(locStart, 2, maxRows, 1).setDataValidation(roleValidation);
+    });
 
-    const includeRange = settingsSheet.getRange(locStart, 3, maxRows, 1);
-    includeRange.insertCheckboxes();
-    if (profileRows.length > 0) {
-      const includeValues = profileRows.map(r => [r[2] === true]);
-      settingsSheet.getRange(locStart, 3, includeValues.length, 1).setValues(includeValues);
-    }
+    runTimedStep_(stepDurations, 'apply_include_checkboxes', function() {
+      const previousRows = previousLocEnd >= locStart ? (previousLocEnd - locStart + 1) : 0;
+      const checkboxRows = Math.max(1, profileRows.length, previousRows);
+      const includeRange = settingsSheet.getRange(locStart, 3, checkboxRows, 1);
+      let hasCheckboxValidation = false;
+      const firstValidation = settingsSheet.getRange(locStart, 3).getDataValidation();
+      if (firstValidation) {
+        hasCheckboxValidation = firstValidation.getCriteriaType() === SpreadsheetApp.DataValidationCriteria.CHECKBOX;
+      }
+      if (!hasCheckboxValidation) {
+        includeRange.insertCheckboxes();
+        checkboxRebuildPerformed = true;
+      }
+      // Column C values are already written in write_location_rows. Re-write only when
+      // checkbox validation was rebuilt to avoid a costly duplicate write pass.
+      if (profileRows.length > 0 && checkboxRebuildPerformed) {
+        const includeValues = profileRows.map(r => [r[2] === true]);
+        settingsSheet.getRange(locStart, 3, includeValues.length, 1).setValues(includeValues);
+      }
+    });
   }
 
-  settingsSheet.getRange('N2').setValue(profileRows.length > 0 ? (locStart + profileRows.length - 1) : (locStart - 1));
-  settingsSheet.getRange('N5').setValue(expectedSignature);
-  settingsSheet.getRange('F2').setValue('Active Profile: ' + profileId);
-  if (!shouldSkipWrite && opts.updateNamedRanges !== false) {
-    createNamedRanges(ss);
+  const nextLocEnd = profileRows.length > 0 ? (locStart + profileRows.length - 1) : (locStart - 1);
+  runTimedStep_(stepDurations, 'write_metadata', function() {
+    settingsSheet.getRange('N2').setValue(nextLocEnd);
+    settingsSheet.getRange('N5').setValue(expectedSignature);
+    settingsSheet.getRange('F2').setValue('Active Profile: ' + profileId);
+  });
+  const shouldUpdateNamedRanges = opts.updateNamedRanges === true && !shouldSkipWrite && previousLocEnd !== nextLocEnd;
+  if (shouldUpdateNamedRanges) {
+    runTimedStep_(stepDurations, 'update_named_ranges', function() {
+      createNamedRanges(ss, { locationOnly: true });
+      namedRangesUpdatedCount = 2; // LocationRoles + LocationRolesLookup
+    });
   }
-  return { rowCount: profileRows.length, skipped: shouldSkipWrite };
+  return {
+    rowCount: profileRows.length,
+    skipped: shouldSkipWrite,
+    signatureChanged: expectedSignature !== existingSignature,
+    expectedSignature: expectedSignature,
+    existingSignature: existingSignature,
+    rowsWritten: rowsWritten,
+    checkboxRebuildPerformed: checkboxRebuildPerformed,
+    namedRangesUpdatedCount: namedRangesUpdatedCount,
+    stepDurationsMs: stepDurations
+  };
 }
 
 function readSettingsLocationRows_(settingsSheet, locStart, maxRows) {
@@ -2961,7 +4511,11 @@ function buildLocationRoleSignature_(profileId, rows) {
   }
   rowTokens.sort();
   const payload = normalizeToken_(profileId) + '||' + rowTokens.join('\n');
-  const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, payload);
+  return computeTextHash_(payload);
+}
+
+function computeTextHash_(payload) {
+  const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, String(payload || ''));
   let hex = '';
   for (let i = 0; i < digest.length; i++) {
     const byte = (digest[i] + 256) % 256;
@@ -3350,10 +4904,10 @@ function setupRestockEngineTab(ss) {
   
   // Barcode Match QC (col AX = 50) - Checks if product has multiple different barcodes
   // Column K ($K$2:$K$5000) contains Inventory Barcodes from raw data
-  // OK ✓ = all inventory rows have same barcode
-  // Check ⚠ = multiple different barcodes exist (staff should verify before pulling)
+  // OK = all inventory rows have same barcode
+  // CHECK = multiple different barcodes exist (staff should verify before pulling)
   sheet.getRange(2, summaryStartCol + 33).setFormula(
-    `=IF(Q2="","",MAP(Q2:Q,LAMBDA(id,IF(id="","",IF(ROWS(UNIQUE(FILTER($K$2:$K$5000,($A$2:$A$5000=id)*($K$2:$K$5000<>""))))>1,"Check ⚠","OK ✓")))))`
+    `=IF(Q2="","",MAP(Q2:Q,LAMBDA(id,IF(id="","",IF(ROWS(UNIQUE(FILTER($K$2:$K$5000,($A$2:$A$5000=id)*($K$2:$K$5000<>""))))>1,"CHECK","OK")))))`
   );
   
   // Set column widths for eligible rows section (columns A-O)
@@ -3382,11 +4936,11 @@ function setupRestockEngineTab(ss) {
 // ============================================================================
 
 function setupRestockChecklistTab(ss) {
-  const sheet = ss.getSheetByName('Restock Checklist');
+  const sheet = ensureSheetByCompatName_(ss, 'Restock List');
   sheet.clear();
   
   // Header area - Row 1: Title + Dates (compact layout)
-  sheet.getRange('A1').setValue('VAULT RESTOCK CHECKLIST');
+  sheet.getRange('A1').setValue('VAULT RESTOCK LIST');
   sheet.getRange('A1').setFontSize(18).setFontWeight('bold');
   
   // Valuation Date (with proper date/time formatting)
@@ -3516,10 +5070,10 @@ function setupRestockChecklistTab(ss) {
 // ============================================================================
 
 function setupNoReserveRiskTab(ss) {
-  const sheet = ss.getSheetByName('No_Reserve_Risk');
+  const sheet = ensureSheetByCompatName_(ss, 'Backstock Alerts');
   sheet.clear();
 
-  sheet.getRange('A1').setValue('NO RESERVE RISK').setFontSize(16).setFontWeight('bold');
+  sheet.getRange('A1').setValue('BACKSTOCK ALERTS').setFontSize(16).setFontWeight('bold');
   sheet.getRange('A2').setValue('Products below target with zero reserve quantity. Use this list for reorder/transfer decisions and mapping audits.');
 
   sheet.getRange('A3').setValue('At-Risk Items').setFontWeight('bold');
@@ -3606,11 +5160,11 @@ function setupNoReserveRiskTab(ss) {
 // ============================================================================
 
 function setupDataExceptionsTab(ss) {
-  const sheet = ss.getSheetByName('Data Exceptions');
+  const sheet = ensureSheetByCompatName_(ss, 'Data Watchlist');
   sheet.clear();
   
   // Header
-  sheet.getRange('A1').setValue('DATA EXCEPTIONS');
+  sheet.getRange('A1').setValue('DATA WATCHLIST');
   sheet.getRange('A1').setFontSize(14).setFontWeight('bold');
   sheet.getRange('A2').setValue('Rows from Treez Valuation that were excluded from processing');
   
@@ -3741,16 +5295,16 @@ function setupComplianceConfigTab(ss) {
 }
 
 function setupMissingComplianceTab(ss) {
-  const sheet = ss.getSheetByName(COMPLIANCE_DEFAULTS.outputSheetName);
+  const sheet = ensureSheetByCompatName_(ss, COMPLIANCE_DEFAULTS.outputSheetName);
   sheet.clear();
 
-  sheet.getRange('A1').setValue('MISSING COMPLIANCE AUDIT').setFontSize(14).setFontWeight('bold');
+  sheet.getRange('A1').setValue('COMPLIANCE ALERTS').setFontSize(14).setFontWeight('bold');
   sheet.getRange('A2').setValue('Use Restock -> Run Daily Update or Run Compliance Only to generate this report.');
   sheet.setColumnWidth(1, 120);
 }
 
 function setupComplianceLogTab(ss) {
-  const sheet = ss.getSheetByName(COMPLIANCE_DEFAULTS.logSheetName);
+  const sheet = ensureSheetByCompatName_(ss, COMPLIANCE_DEFAULTS.logSheetName);
   sheet.clear();
 
   const headers = [
@@ -3779,7 +5333,8 @@ function applyAllFormatting(ss) {
 }
 
 function applyChecklistConditionalFormatting(ss) {
-  const sheet = ss.getSheetByName('Restock Checklist');
+  const sheet = getSheetByCompatName_(ss, 'Restock List');
+  if (!sheet) return;
   const dataStartRow = 3;
   const numCols = CONFIG.checklistColumns.length;
   // Use large range - formula-based rules only highlight rows with matching data
@@ -3846,13 +5401,38 @@ function applyChecklistConditionalFormatting(ss) {
 // NAMED RANGES
 // ============================================================================
 
-function createNamedRanges(ss) {
-  // Remove existing named ranges first
-  const existingRanges = ss.getNamedRanges();
-  for (const range of existingRanges) {
-    range.remove();
+function buildNamedRangeMap_(ss) {
+  const map = {};
+  const ranges = ss.getNamedRanges();
+  for (let i = 0; i < ranges.length; i++) {
+    map[ranges[i].getName()] = ranges[i];
   }
-  
+  return map;
+}
+
+function setOrUpdateNamedRange_(ss, namedRangeMap, name, range) {
+  const existing = namedRangeMap[name];
+  if (existing) {
+    const existingRange = existing.getRange();
+    const unchanged =
+      existingRange.getSheet().getSheetId() === range.getSheet().getSheetId() &&
+      existingRange.getRow() === range.getRow() &&
+      existingRange.getColumn() === range.getColumn() &&
+      existingRange.getNumRows() === range.getNumRows() &&
+      existingRange.getNumColumns() === range.getNumColumns();
+    if (!unchanged) {
+      existing.setRange(range);
+    }
+  } else {
+    ss.setNamedRange(name, range);
+  }
+}
+
+function createNamedRanges(ss, options) {
+  const opts = options || {};
+  const locationOnly = opts.locationOnly === true;
+  const namedRangeMap = buildNamedRangeMap_(ss);
+
   // Location Roles + Stocking Rules ranges (dynamic via metadata cells N1:N4)
   const settingsSheet = ss.getSheetByName('Restock Settings');
   const locStart = parseInt(settingsSheet.getRange('N1').getValue(), 10) || 5;
@@ -3862,13 +5442,21 @@ function createNamedRanges(ss) {
   const rulesEndRaw = parseInt(settingsSheet.getRange('N4').getValue(), 10) || (rulesStart + STOCKING_RULES_DATA.length - 1);
   const rulesEnd = Math.max(rulesStart, rulesEndRaw);
 
-  ss.setNamedRange('LocationRoles', settingsSheet.getRange(locStart, 1, locEnd - locStart + 1, 4));
-  ss.setNamedRange('LocationRolesLookup', settingsSheet.getRange(locStart, 1, locEnd - locStart + 1, 2));
-  ss.setNamedRange('StockingRules', settingsSheet.getRange(rulesStart, 1, rulesEnd - rulesStart + 1, 9));
-  
+  setOrUpdateNamedRange_(ss, namedRangeMap, 'LocationRoles', settingsSheet.getRange(locStart, 1, locEnd - locStart + 1, 4));
+  setOrUpdateNamedRange_(ss, namedRangeMap, 'LocationRolesLookup', settingsSheet.getRange(locStart, 1, locEnd - locStart + 1, 2));
+
+  if (locationOnly) return;
+
+  setOrUpdateNamedRange_(ss, namedRangeMap, 'StockingRules', settingsSheet.getRange(rulesStart, 1, rulesEnd - rulesStart + 1, 9));
+
   // Treez raw data range
   const rawSheet = ss.getSheetByName('Treez Valuation (Raw)');
-  ss.setNamedRange('TreezData', rawSheet.getRange(CONFIG.rawDataStartRow, 1, 10000 - CONFIG.rawDataStartRow + 1, CONFIG.treezColumns.length));
+  setOrUpdateNamedRange_(
+    ss,
+    namedRangeMap,
+    'TreezData',
+    rawSheet.getRange(CONFIG.rawDataStartRow, 1, 10000 - CONFIG.rawDataStartRow + 1, CONFIG.treezColumns.length)
+  );
 }
 
 // ============================================================================
@@ -3889,6 +5477,10 @@ function setupProtections(ss) {
   const diagnosticsSheet = ss.getSheetByName(DIAGNOSTICS.sheetName);
   if (diagnosticsSheet) {
     diagnosticsSheet.hideSheet();
+  }
+  const aiDiagnosticsSheet = ss.getSheetByName(AI_DIAGNOSTICS.sheetName);
+  if (aiDiagnosticsSheet) {
+    aiDiagnosticsSheet.hideSheet();
   }
 
   // Add a warning row to Settings tab near the Stocking Rules section.
@@ -3924,7 +5516,8 @@ function hideEngineTab() {
  */
 function resetChecklistManualColumns() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName('Restock Checklist');
+  const sheet = getSheetByCompatName_(ss, 'Restock List');
+  if (!sheet) return;
   const props = PropertiesService.getDocumentProperties();
   const previousRows = parseInt(props.getProperty(SYSTEM_REFERENCE.props.lastChecklistRows) || '0', 10);
   const clearRows = Math.max(200, isNaN(previousRows) ? 0 : previousRows);
@@ -3952,12 +5545,37 @@ function runComplianceCheck(options) {
   const opts = options || {};
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const ui = SpreadsheetApp.getUi();
+  const props = PropertiesService.getDocumentProperties();
   const warnings = [];
+  const diagnostics = opts.diagnostics || null;
+  const stepDurations = {};
+  const diagMetrics = {
+    dataRowsInRaw: 0,
+    requiredIndexCount: 0,
+    checkpointsLogged: 0,
+    progressEnabled: false,
+    apiReadCalls: 0,
+    apiWriteCalls: 0,
+    rowsHighlighted: 0,
+    rowsCleared: 0,
+    rowsChanged: 0,
+    highlightRepaintSkipped: false,
+    outputWriteSkipped: false,
+    readStrategy: '',
+    segmentCount: 0,
+    spanWidth: 0
+  };
 
   try {
-    const cfg = readComplianceConfig_(ss, warnings);
-    const outputSheet = ss.getSheetByName(COMPLIANCE_DEFAULTS.outputSheetName) || ss.insertSheet(COMPLIANCE_DEFAULTS.outputSheetName);
-    const rawSheet = ss.getSheetByName(cfg.rawSheetName);
+    const cfg = runTimedStep_(stepDurations, 'read_config', function() {
+      return readComplianceConfig_(ss, warnings);
+    });
+    const outputSheet = runTimedStep_(stepDurations, 'resolve_output_sheet', function() {
+      return getSheetByCompatName_(ss, COMPLIANCE_DEFAULTS.outputSheetName) || ensureSheetByCompatName_(ss, COMPLIANCE_DEFAULTS.outputSheetName);
+    });
+    const rawSheet = runTimedStep_(stepDurations, 'resolve_raw_sheet', function() {
+      return ss.getSheetByName(cfg.rawSheetName);
+    });
 
     const summary = {
       runTimestamp: new Date(),
@@ -3972,30 +5590,91 @@ function runComplianceCheck(options) {
     if (!rawSheet) {
       addWarning_(warnings, 'Raw sheet not found: ' + cfg.rawSheetName);
       clearStoredComplianceHighlightRows_();
-      writeComplianceOutput_(outputSheet, summary, [], warnings);
-      appendComplianceLog_(ss, summary, warnings);
+      runTimedStep_(stepDurations, 'write_output', function() {
+        const writeStats = writeComplianceOutput_(outputSheet, summary, [], warnings);
+        diagMetrics.apiWriteCalls += writeStats.writeCalls || 0;
+        diagMetrics.rowsChanged += writeStats.rowsWritten || 0;
+      });
+      props.setProperty(SYSTEM_REFERENCE.props.complianceSnapshotHash, buildComplianceSnapshotHash_(summary, [], warnings));
+      runTimedStep_(stepDurations, 'append_log', function() {
+        appendComplianceLog_(ss, summary, warnings);
+        diagMetrics.apiWriteCalls += 1;
+      });
+      emitDiagnosticsCheckpoint_(ss, diagnostics, 'COMPLIANCE_ABORT', 'WARN', {
+        reason: 'RAW_SHEET_MISSING',
+        raw_sheet_name: cfg.rawSheetName
+      });
       if (!opts.silent) {
         ui.alert('Compliance check completed with warnings.\n\nRaw sheet was not found.');
       }
-      return { ok: false, summary: summary, warnings: warnings, reason: 'RAW_SHEET_MISSING' };
+      return {
+        ok: false,
+        summary: summary,
+        warnings: warnings,
+        reason: 'RAW_SHEET_MISSING',
+        diagnostics: {
+          stepDurationsMs: stepDurations,
+          metrics: diagMetrics
+        }
+      };
     }
 
-    const lastRow = rawSheet.getLastRow();
-    const lastCol = rawSheet.getLastColumn();
+    const dimensions = runTimedStep_(stepDurations, 'read_raw_dimensions', function() {
+      return {
+        lastRow: rawSheet.getLastRow(),
+        lastCol: rawSheet.getLastColumn()
+      };
+    });
+    diagMetrics.apiReadCalls += 2;
+    const lastRow = dimensions.lastRow;
+    const lastCol = dimensions.lastCol;
     if (lastRow < cfg.headerRow || lastCol < 1 || lastRow < cfg.dataStartRow) {
       addWarning_(warnings, 'Raw sheet has no data rows to scan.');
-      clearTrackedComplianceHighlights_(rawSheet, lastCol);
+      runTimedStep_(stepDurations, 'clear_highlights', function() {
+        const cleared = clearTrackedComplianceHighlights_(rawSheet, lastCol);
+        diagMetrics.rowsCleared += cleared.rowsAffected || 0;
+        diagMetrics.apiWriteCalls += cleared.writeCalls || 0;
+      });
       clearStoredComplianceHighlightRows_();
-      writeComplianceOutput_(outputSheet, summary, [], warnings);
-      appendComplianceLog_(ss, summary, warnings);
+      runTimedStep_(stepDurations, 'write_output', function() {
+        const writeStats = writeComplianceOutput_(outputSheet, summary, [], warnings);
+        diagMetrics.apiWriteCalls += writeStats.writeCalls || 0;
+        diagMetrics.rowsChanged += writeStats.rowsWritten || 0;
+      });
+      props.setProperty(SYSTEM_REFERENCE.props.complianceSnapshotHash, buildComplianceSnapshotHash_(summary, [], warnings));
+      runTimedStep_(stepDurations, 'append_log', function() {
+        appendComplianceLog_(ss, summary, warnings);
+        diagMetrics.apiWriteCalls += 1;
+      });
+      emitDiagnosticsCheckpoint_(ss, diagnostics, 'COMPLIANCE_ABORT', 'INFO', {
+        reason: 'NO_DATA_ROWS',
+        last_row: lastRow,
+        last_col: lastCol,
+        header_row: cfg.headerRow,
+        data_start_row: cfg.dataStartRow
+      });
       if (!opts.silent) {
         ui.alert('Compliance check completed.\n\nNo raw data rows were found.');
       }
-      return { ok: true, summary: summary, warnings: warnings, reason: 'NO_DATA_ROWS' };
+      return {
+        ok: true,
+        summary: summary,
+        warnings: warnings,
+        reason: 'NO_DATA_ROWS',
+        diagnostics: {
+          stepDurationsMs: stepDurations,
+          metrics: diagMetrics
+        }
+      };
     }
 
-    const headerValues = rawSheet.getRange(cfg.headerRow, 1, 1, lastCol).getDisplayValues()[0];
-    const columns = resolveComplianceColumns_(headerValues, cfg.aliases, warnings);
+    const headerValues = runTimedStep_(stepDurations, 'read_headers', function() {
+      return rawSheet.getRange(cfg.headerRow, 1, 1, lastCol).getDisplayValues()[0];
+    });
+    diagMetrics.apiReadCalls += 1;
+    const columns = runTimedStep_(stepDurations, 'resolve_columns', function() {
+      return resolveComplianceColumns_(headerValues, cfg.aliases, warnings);
+    });
 
     const hasStatusColumn = columns.status >= 0;
     const hasLocationColumn = columns.location >= 0;
@@ -4022,116 +5701,239 @@ function runComplianceCheck(options) {
     }
 
     const dataRowCount = lastRow - cfg.dataStartRow + 1;
-    const requiredIndexes = collectComplianceColumnIndexes_(columns);
-    const columnData = readComplianceColumnData_(rawSheet, cfg.dataStartRow, dataRowCount, requiredIndexes);
+    diagMetrics.dataRowsInRaw = dataRowCount;
+    diagMetrics.rowsTotal = dataRowCount;
+    const requiredIndexes = runTimedStep_(stepDurations, 'resolve_required_indexes', function() {
+      return collectComplianceColumnIndexes_(columns);
+    });
+    diagMetrics.requiredIndexCount = requiredIndexes.length;
+    emitDiagnosticsCheckpoint_(ss, diagnostics, 'COMPLIANCE_PROGRESS', 'INFO', {
+      phase: 'scan_setup',
+      data_rows_in_raw: dataRowCount,
+      required_indexes: requiredIndexes.length
+    });
+    const columnData = runTimedStep_(stepDurations, 'read_column_data', function() {
+      return readComplianceColumnData_(rawSheet, cfg.dataStartRow, dataRowCount, requiredIndexes);
+    });
+    const columnReadMeta = columnData.__meta || {};
+    diagMetrics.readStrategy = columnReadMeta.strategy || '';
+    diagMetrics.segmentCount = columnReadMeta.segmentCount || 0;
+    diagMetrics.spanWidth = columnReadMeta.spanWidth || 0;
+    diagMetrics.apiReadCalls += columnReadMeta.apiReadCalls || 0;
+    emitDiagnosticsCheckpoint_(ss, diagnostics, 'COMPLIANCE_PROGRESS', 'INFO', {
+      phase: 'column_data_ready',
+      read_column_data_ms: stepDurations.read_column_data || 0,
+      read_strategy: columnReadMeta.strategy || 'unknown',
+      segment_count: columnReadMeta.segmentCount || 0,
+      span_width: columnReadMeta.spanWidth || 0
+    });
 
     const flaggedRows = [];
     const flaggedSourceRows = [];
+    const progressInterval = Math.max(500, DIAGNOSTICS.progressRowInterval || 2500);
+    const progressMinIntervalMs = Math.max(1000, DIAGNOSTICS.progressMinIntervalMs || 4000);
+    const progressMaxEvents = Math.max(1, DIAGNOSTICS.progressMaxEvents || 12);
+    diagMetrics.progressEnabled = diagnostics && diagnostics.runCtx && dataRowCount >= progressInterval;
+    let nextProgressRow = progressInterval;
+    let lastProgressTs = Date.now();
+    let lastProgressRowLogged = 0;
+    const scanStartedMs = Date.now();
+    const maybeEmitProgress = function(scannedRows, force) {
+      if (!diagMetrics.progressEnabled) return;
+      if (diagMetrics.checkpointsLogged >= progressMaxEvents && !force) return;
+      const crossedBoundary = scannedRows >= nextProgressRow || scannedRows === dataRowCount || force;
+      if (!crossedBoundary) return;
 
-    for (let i = 0; i < dataRowCount; i++) {
-      const sourceRow = cfg.dataStartRow + i;
-
-      if (isRowEmptyByIndexes_(columnData, i, requiredIndexes)) {
-        continue;
+      while (nextProgressRow <= scannedRows) {
+        nextProgressRow += progressInterval;
       }
+      const now = Date.now();
+      const enoughTimeElapsed = (now - lastProgressTs) >= progressMinIntervalMs || scannedRows === dataRowCount || force;
+      if (!enoughTimeElapsed && !force) return;
 
-      summary.totalRowsScanned++;
+      diagMetrics.checkpointsLogged++;
+      lastProgressTs = now;
+      lastProgressRowLogged = scannedRows;
+      emitDiagnosticsCheckpoint_(ss, diagnostics, 'COMPLIANCE_PROGRESS', 'INFO', {
+        rows_scanned: scannedRows,
+        rows_total: dataRowCount,
+        non_empty_rows: summary.totalRowsScanned,
+        processed_rows: summary.processedRowsScanned,
+        flagged_rows: flaggedRows.length,
+        elapsed_ms: now - scanStartedMs
+      });
+    };
 
-      const statusText = getDisplayByColumnData_(columnData, i, columns.status);
-      const locationText = getDisplayByColumnData_(columnData, i, columns.location);
+    runTimedStep_(stepDurations, 'scan_rows', function() {
+      for (let i = 0; i < dataRowCount; i++) {
+        maybeEmitProgress(i + 1, false);
+        const sourceRow = cfg.dataStartRow + i;
 
-      const statusMatch = hasStatusColumn && cfg.processedStatusSet.has(normalizeToken_(statusText));
-      const locationMatch = hasLocationColumn && !isExcludedLocation_(locationText, cfg.excludedLocationTokens);
-      const isProcessed = isProcessedRow_(
-        cfg.processedLogicMode,
-        hasStatusColumn,
-        hasLocationColumn,
-        statusMatch,
-        locationMatch
-      );
+        if (isRowEmptyByIndexes_(columnData, i, requiredIndexes)) {
+          continue;
+        }
 
-      if (!isProcessed) {
-        continue;
-      }
+        summary.totalRowsScanned++;
 
-      if (cfg.requireQtyGtZero && columns.qty_on_hand >= 0) {
-        const qty = parseNumeric_(
-          getRawByColumnData_(columnData, i, columns.qty_on_hand),
-          getDisplayByColumnData_(columnData, i, columns.qty_on_hand)
+        const statusText = getDisplayByColumnData_(columnData, i, columns.status);
+        const locationText = getDisplayByColumnData_(columnData, i, columns.location);
+
+        const statusMatch = hasStatusColumn && cfg.processedStatusSet.has(normalizeToken_(statusText));
+        const locationMatch = hasLocationColumn && !isExcludedLocation_(locationText, cfg.excludedLocationTokens);
+        const isProcessed = isProcessedRow_(
+          cfg.processedLogicMode,
+          hasStatusColumn,
+          hasLocationColumn,
+          statusMatch,
+          locationMatch
         );
-        if (isNaN(qty) || qty <= 0) {
+
+        if (!isProcessed) {
           continue;
         }
-      }
 
-      if (cfg.productTypeScope === 'CANNABIS_ONLY' && columns.product_type >= 0) {
-        const productTypeToken = normalizeToken_(getDisplayByColumnData_(columnData, i, columns.product_type));
-        if (!cfg.cannabisTypeSet.has(productTypeToken)) {
+        if (cfg.requireQtyGtZero && columns.qty_on_hand >= 0) {
+          const qty = parseNumeric_(
+            getRawByColumnData_(columnData, i, columns.qty_on_hand),
+            getDisplayByColumnData_(columnData, i, columns.qty_on_hand)
+          );
+          if (isNaN(qty) || qty <= 0) {
+            continue;
+          }
+        }
+
+        if (cfg.productTypeScope === 'CANNABIS_ONLY' && columns.product_type >= 0) {
+          const productTypeToken = normalizeToken_(getDisplayByColumnData_(columnData, i, columns.product_type));
+          if (!cfg.cannabisTypeSet.has(productTypeToken)) {
+            continue;
+          }
+        }
+
+        summary.processedRowsScanned++;
+
+        let hasThc = false;
+        for (let j = 0; j < columns.thc.length; j++) {
+          const thcCol = columns.thc[j];
+          if (isMeaningfulThc_(
+            getRawByColumnData_(columnData, i, thcCol),
+            getDisplayByColumnData_(columnData, i, thcCol),
+            cfg.missingTokenSet
+          )) {
+            hasThc = true;
+            break;
+          }
+        }
+
+        let hasExpiration = false;
+        if (columns.expiration >= 0) {
+          hasExpiration = isValidExpiration_(
+            getRawByColumnData_(columnData, i, columns.expiration),
+            getDisplayByColumnData_(columnData, i, columns.expiration),
+            cfg.missingTokenSet
+          );
+        }
+
+        const missingThc = !hasThc;
+        const missingExp = !hasExpiration;
+
+        if (!missingThc && !missingExp) {
           continue;
         }
-      }
 
-      summary.processedRowsScanned++;
+        if (missingThc) summary.missingThcCount++;
+        if (missingExp) summary.missingExpCount++;
+        if (missingThc && missingExp) summary.missingBothCount++;
 
-      let hasThc = false;
-      for (let j = 0; j < columns.thc.length; j++) {
-        const thcCol = columns.thc[j];
-        if (isMeaningfulThc_(
-          getRawByColumnData_(columnData, i, thcCol),
-          getDisplayByColumnData_(columnData, i, thcCol),
-          cfg.missingTokenSet
-        )) {
-          hasThc = true;
-          break;
-        }
-      }
+        const flag = missingThc && missingExp ? 'MISSING_BOTH' : (missingThc ? 'MISSING_THC' : 'MISSING_EXP');
+        const thcValues = buildThcValuesStringFromColumnData_(headerValues, columnData, i, columns.thc);
 
-      let hasExpiration = false;
-      if (columns.expiration >= 0) {
-        hasExpiration = isValidExpiration_(
-          getRawByColumnData_(columnData, i, columns.expiration),
+        flaggedRows.push([
+          sourceRow,
+          getDisplayByColumnData_(columnData, i, columns.product_name),
+          getDisplayByColumnData_(columnData, i, columns.brand_vendor),
+          getDisplayByColumnData_(columnData, i, columns.sku_item_id),
+          getDisplayByColumnData_(columnData, i, columns.batch_lot),
+          getDisplayByColumnData_(columnData, i, columns.product_type),
+          locationText,
+          statusText,
+          getDisplayByColumnData_(columnData, i, columns.qty_on_hand),
+          thcValues,
           getDisplayByColumnData_(columnData, i, columns.expiration),
-          cfg.missingTokenSet
-        );
+          flag
+        ]);
+        flaggedSourceRows.push(sourceRow);
       }
-
-      const missingThc = !hasThc;
-      const missingExp = !hasExpiration;
-
-      if (!missingThc && !missingExp) {
-        continue;
+      if (diagMetrics.progressEnabled && lastProgressRowLogged < dataRowCount) {
+        maybeEmitProgress(dataRowCount, true);
       }
-
-      if (missingThc) summary.missingThcCount++;
-      if (missingExp) summary.missingExpCount++;
-      if (missingThc && missingExp) summary.missingBothCount++;
-
-      const flag = missingThc && missingExp ? 'MISSING_BOTH' : (missingThc ? 'MISSING_THC' : 'MISSING_EXP');
-      const thcValues = buildThcValuesStringFromColumnData_(headerValues, columnData, i, columns.thc);
-
-      flaggedRows.push([
-        sourceRow,
-        getDisplayByColumnData_(columnData, i, columns.product_name),
-        getDisplayByColumnData_(columnData, i, columns.brand_vendor),
-        getDisplayByColumnData_(columnData, i, columns.sku_item_id),
-        getDisplayByColumnData_(columnData, i, columns.batch_lot),
-        getDisplayByColumnData_(columnData, i, columns.product_type),
-        locationText,
-        statusText,
-        getDisplayByColumnData_(columnData, i, columns.qty_on_hand),
-        thcValues,
-        getDisplayByColumnData_(columnData, i, columns.expiration),
-        flag
-      ]);
-      flaggedSourceRows.push(sourceRow);
-    }
+    });
 
     summary.flaggedRowsCount = flaggedRows.length;
-    clearTrackedComplianceHighlights_(rawSheet, lastCol);
-    highlightComplianceRows_(rawSheet, flaggedSourceRows, lastCol);
-    storeComplianceHighlightRows_(flaggedSourceRows);
-    writeComplianceOutput_(outputSheet, summary, flaggedRows, warnings);
-    appendComplianceLog_(ss, summary, warnings);
+    const nextHighlightRows = dedupeSortedNumericRows_(flaggedSourceRows);
+    const nextHighlightHash = computeTextHash_(nextHighlightRows.join(','));
+    const previousHighlightHash = props.getProperty(SYSTEM_REFERENCE.props.complianceHighlightHash) || '';
+    const highlightUnchanged = nextHighlightHash === previousHighlightHash;
+    runTimedStep_(stepDurations, 'apply_highlights', function() {
+      if (highlightUnchanged) {
+        diagMetrics.highlightRepaintSkipped = true;
+        return;
+      }
+      const cleared = clearTrackedComplianceHighlights_(rawSheet, lastCol);
+      const painted = highlightComplianceRows_(rawSheet, nextHighlightRows, lastCol);
+      storeComplianceHighlightRows_(nextHighlightRows);
+      props.setProperty(SYSTEM_REFERENCE.props.complianceHighlightHash, nextHighlightHash);
+      diagMetrics.rowsCleared += cleared.rowsAffected || 0;
+      diagMetrics.rowsHighlighted += painted.rowsAffected || 0;
+      diagMetrics.apiWriteCalls += (cleared.writeCalls || 0) + (painted.writeCalls || 0);
+    });
+    diagMetrics.rowsChanged = diagMetrics.rowsCleared + diagMetrics.rowsHighlighted;
+
+    const snapshotHash = buildComplianceSnapshotHash_(summary, flaggedRows, warnings);
+    const previousSnapshotHash = props.getProperty(SYSTEM_REFERENCE.props.complianceSnapshotHash) || '';
+    const snapshotUnchanged = snapshotHash === previousSnapshotHash;
+    runTimedStep_(stepDurations, 'write_output', function() {
+      if (snapshotUnchanged) {
+        diagMetrics.outputWriteSkipped = true;
+        return;
+      }
+      const writeStats = writeComplianceOutput_(outputSheet, summary, flaggedRows, warnings);
+      props.setProperty(SYSTEM_REFERENCE.props.complianceSnapshotHash, snapshotHash);
+      diagMetrics.apiWriteCalls += writeStats.writeCalls || 0;
+      diagMetrics.rowsChanged += writeStats.rowsWritten || 0;
+    });
+    runTimedStep_(stepDurations, 'append_log', function() {
+      appendComplianceLog_(ss, summary, warnings);
+      diagMetrics.apiWriteCalls += 1;
+    });
+
+    const complianceDetail = {
+      total_rows_scanned: summary.totalRowsScanned,
+      processed_rows_scanned: summary.processedRowsScanned,
+      flagged_rows: summary.flaggedRowsCount,
+      missing_thc: summary.missingThcCount,
+      missing_exp: summary.missingExpCount,
+      missing_both: summary.missingBothCount,
+      warnings: warnings.length,
+      data_rows_in_raw: diagMetrics.dataRowsInRaw,
+      required_indexes: diagMetrics.requiredIndexCount,
+      checkpoints_logged: diagMetrics.checkpointsLogged
+    };
+    complianceDetail.read_strategy = columnReadMeta.strategy || 'unknown';
+    complianceDetail.segment_count = columnReadMeta.segmentCount || 0;
+    complianceDetail.span_width = columnReadMeta.spanWidth || 0;
+    complianceDetail.api_read_calls = diagMetrics.apiReadCalls;
+    complianceDetail.api_write_calls = diagMetrics.apiWriteCalls;
+    complianceDetail.rows_changed = diagMetrics.rowsChanged;
+    complianceDetail.rows_cleared = diagMetrics.rowsCleared;
+    complianceDetail.rows_highlighted = diagMetrics.rowsHighlighted;
+    complianceDetail.highlight_repaint_skipped = diagMetrics.highlightRepaintSkipped;
+    complianceDetail.output_write_skipped = diagMetrics.outputWriteSkipped;
+    const stepMetrics = summarizeStepDurations_(stepDurations);
+    const stepKeys = Object.keys(stepMetrics);
+    for (let i = 0; i < stepKeys.length; i++) {
+      complianceDetail[stepKeys[i]] = stepMetrics[stepKeys[i]];
+    }
+    emitDiagnosticsCheckpoint_(ss, diagnostics, 'COMPLIANCE_DETAIL', 'INFO', complianceDetail);
 
     if (!opts.silent) {
       ui.alert(
@@ -4143,13 +5945,33 @@ function runComplianceCheck(options) {
         'Missing Both: ' + summary.missingBothCount
       );
     }
-    return { ok: true, summary: summary, warnings: warnings };
+    return {
+      ok: true,
+      summary: summary,
+      warnings: warnings,
+      diagnostics: {
+        stepDurationsMs: stepDurations,
+        metrics: diagMetrics
+      }
+    };
   } catch (error) {
     Logger.log('Compliance check failed: ' + error);
+    emitDiagnosticsCheckpoint_(ss, diagnostics, 'COMPLIANCE_FAIL', 'ERROR', {
+      error: String(error)
+    });
     if (!opts.silent) {
       ui.alert('Compliance check failed.\n\n' + error);
     }
-    return { ok: false, reason: 'EXCEPTION', error: String(error), warnings: warnings };
+    return {
+      ok: false,
+      reason: 'EXCEPTION',
+      error: String(error),
+      warnings: warnings,
+      diagnostics: {
+        stepDurationsMs: stepDurations,
+        metrics: diagMetrics
+      }
+    };
   }
 }
 
@@ -4158,7 +5980,7 @@ function clearComplianceOutput() {
   const ui = SpreadsheetApp.getUi();
   const warnings = [];
 
-  const outputSheet = ss.getSheetByName(COMPLIANCE_DEFAULTS.outputSheetName);
+  const outputSheet = getSheetByCompatName_(ss, COMPLIANCE_DEFAULTS.outputSheetName);
   if (outputSheet) {
     setupMissingComplianceTab(ss);
   }
@@ -4169,14 +5991,19 @@ function clearComplianceOutput() {
     clearTrackedComplianceHighlights_(rawSheet, rawSheet.getLastColumn());
   }
   clearStoredComplianceHighlightRows_();
+  PropertiesService.getDocumentProperties().deleteProperty(SYSTEM_REFERENCE.props.complianceSnapshotHash);
 
   ui.alert('Compliance output cleared.');
 }
 
 function writeComplianceOutput_(sheet, summary, flaggedRows, warnings) {
+  let writeCalls = 0;
+  let rowsWritten = 0;
   sheet.clear();
+  writeCalls++;
 
   sheet.getRange('A1').setValue('Compliance Audit Summary').setFontSize(14).setFontWeight('bold');
+  writeCalls++;
   sheet.getRange('A2:B7').setValues([
     ['Run Timestamp', summary.runTimestamp],
     ['Total Rows Scanned', summary.totalRowsScanned],
@@ -4185,11 +6012,16 @@ function writeComplianceOutput_(sheet, summary, flaggedRows, warnings) {
     ['Missing Expiration', summary.missingExpCount],
     ['Missing Both', summary.missingBothCount]
   ]);
+  writeCalls++;
   sheet.getRange('A2:A7').setFontWeight('bold');
+  writeCalls++;
   sheet.getRange('B2').setNumberFormat('yyyy-mm-dd hh:mm:ss');
+  writeCalls++;
 
   sheet.getRange('A8').setValue('Warnings').setFontWeight('bold');
+  writeCalls++;
   sheet.getRange('B8').setValue(warnings.length ? warnings.join(' | ') : 'None');
+  writeCalls++;
 
   const headerRow = 10;
   const headers = [
@@ -4208,32 +6040,46 @@ function writeComplianceOutput_(sheet, summary, flaggedRows, warnings) {
   ];
 
   sheet.getRange(headerRow, 1, 1, headers.length).setValues([headers]);
+  writeCalls++;
   sheet.getRange(headerRow, 1, 1, headers.length).setFontWeight('bold').setBackground(CONFIG.colors.header);
+  writeCalls++;
 
   if (flaggedRows.length > 0) {
     sheet.getRange(headerRow + 1, 1, flaggedRows.length, headers.length).setValues(flaggedRows);
+    writeCalls++;
+    rowsWritten += flaggedRows.length;
   } else {
     sheet.getRange(headerRow + 1, 1).setValue('No compliance issues found for current config.');
+    writeCalls++;
+    rowsWritten += 1;
   }
 
   const widths = [90, 300, 180, 170, 150, 110, 150, 120, 100, 320, 150, 140];
   for (let i = 0; i < widths.length; i++) {
     sheet.setColumnWidth(i + 1, widths[i]);
+    writeCalls++;
   }
 
   if (sheet.getFilter()) {
     sheet.getFilter().remove();
+    writeCalls++;
   }
   const dataRows = Math.max(1, flaggedRows.length + 1);
   sheet.getRange(headerRow, 1, dataRows, headers.length).createFilter();
+  writeCalls++;
 
   sheet.setFrozenRows(headerRow);
+  writeCalls++;
+  return {
+    writeCalls: writeCalls,
+    rowsWritten: rowsWritten
+  };
 }
 
 function appendComplianceLog_(ss, summary, warnings) {
-  let sheet = ss.getSheetByName(COMPLIANCE_DEFAULTS.logSheetName);
+  let sheet = getSheetByCompatName_(ss, COMPLIANCE_DEFAULTS.logSheetName);
   if (!sheet) {
-    sheet = ss.insertSheet(COMPLIANCE_DEFAULTS.logSheetName);
+    sheet = ensureSheetByCompatName_(ss, COMPLIANCE_DEFAULTS.logSheetName);
     setupComplianceLogTab(ss);
   }
 
@@ -4250,20 +6096,25 @@ function appendComplianceLog_(ss, summary, warnings) {
 }
 
 function clearComplianceHighlights_(rawSheet, dataStartRow, lastRow, lastCol) {
-  if (!rawSheet || lastRow < dataStartRow || lastCol < 1) return;
+  if (!rawSheet || lastRow < dataStartRow || lastCol < 1) {
+    return { rowsAffected: 0, writeCalls: 0 };
+  }
   rawSheet.getRange(dataStartRow, 1, lastRow - dataStartRow + 1, lastCol).setBackground('#ffffff');
+  return { rowsAffected: Math.max(0, lastRow - dataStartRow + 1), writeCalls: 1 };
 }
 
 function highlightComplianceRows_(rawSheet, sourceRows, lastCol) {
-  if (!rawSheet || sourceRows.length === 0 || lastCol < 1) return;
-  applyRowBackgrounds_(rawSheet, sourceRows, lastCol, CONFIG.colors.complianceFlag);
+  if (!rawSheet || sourceRows.length === 0 || lastCol < 1) {
+    return { rowsAffected: 0, writeCalls: 0 };
+  }
+  return applyRowBackgrounds_(rawSheet, sourceRows, lastCol, CONFIG.colors.complianceFlag);
 }
 
 function clearTrackedComplianceHighlights_(rawSheet, lastCol) {
-  if (!rawSheet || lastCol < 1) return;
+  if (!rawSheet || lastCol < 1) return { rowsAffected: 0, writeCalls: 0 };
   const rows = readStoredComplianceHighlightRows_();
-  if (rows.length === 0) return;
-  applyRowBackgrounds_(rawSheet, rows, lastCol, '#ffffff');
+  if (rows.length === 0) return { rowsAffected: 0, writeCalls: 0 };
+  return applyRowBackgrounds_(rawSheet, rows, lastCol, '#ffffff');
 }
 
 function storeComplianceHighlightRows_(rows) {
@@ -4286,6 +6137,7 @@ function readStoredComplianceHighlightRows_() {
 function clearStoredComplianceHighlightRows_() {
   const props = PropertiesService.getDocumentProperties();
   props.deleteProperty(SYSTEM_REFERENCE.props.complianceHighlightRows);
+  props.deleteProperty(SYSTEM_REFERENCE.props.complianceHighlightHash);
 }
 
 function dedupeSortedNumericRows_(rows) {
@@ -4301,18 +6153,40 @@ function dedupeSortedNumericRows_(rows) {
   return out;
 }
 
+function buildComplianceSnapshotHash_(summary, flaggedRows, warnings) {
+  const payload = {
+    totalRowsScanned: summary && summary.totalRowsScanned ? summary.totalRowsScanned : 0,
+    processedRowsScanned: summary && summary.processedRowsScanned ? summary.processedRowsScanned : 0,
+    missingThcCount: summary && summary.missingThcCount ? summary.missingThcCount : 0,
+    missingExpCount: summary && summary.missingExpCount ? summary.missingExpCount : 0,
+    missingBothCount: summary && summary.missingBothCount ? summary.missingBothCount : 0,
+    flaggedRowsCount: summary && summary.flaggedRowsCount ? summary.flaggedRowsCount : 0,
+    warnings: warnings || [],
+    flaggedRows: flaggedRows || []
+  };
+  return computeTextHash_(safeJson_(payload));
+}
+
 function applyRowBackgrounds_(sheet, rows, lastCol, color) {
-  if (!sheet || rows.length === 0 || lastCol < 1) return;
+  if (!sheet || rows.length === 0 || lastCol < 1) {
+    return { rowsAffected: 0, writeCalls: 0 };
+  }
   const endColLetter = columnToLetter_(lastCol);
   const uniqueRows = dedupeSortedNumericRows_(rows);
   const a1Ranges = uniqueRows.map(rowNum => 'A' + rowNum + ':' + endColLetter + rowNum);
   const chunkSize = 200;
+  let writeCalls = 0;
   for (let i = 0; i < a1Ranges.length; i += chunkSize) {
     const chunk = a1Ranges.slice(i, i + chunkSize);
     if (chunk.length > 0) {
       sheet.getRangeList(chunk).setBackground(color);
+      writeCalls++;
     }
   }
+  return {
+    rowsAffected: uniqueRows.length,
+    writeCalls: writeCalls
+  };
 }
 
 function columnToLetter_(column) {
@@ -4553,16 +6427,20 @@ function readComplianceColumnData_(sheet, startRow, rowCount, indexes) {
   }
   segments.push([segStart, segEnd]);
 
-  for (let i = 0; i < segments.length; i++) {
-    const startIdx = segments[i][0];
-    const endIdx = segments[i][1];
-    const width = endIdx - startIdx + 1;
-    const range = sheet.getRange(startRow, startIdx + 1, rowCount, width);
+  const minIdx = sorted[0];
+  const maxIdx = sorted[sorted.length - 1];
+  const spanWidth = maxIdx - minIdx + 1;
+  const useSingleBlockRead = segments.length > 2 && spanWidth <= 80;
+  let apiReadCalls = 0;
+
+  if (useSingleBlockRead) {
+    const range = sheet.getRange(startRow, minIdx + 1, rowCount, spanWidth);
     const values = range.getValues();
     const displays = range.getDisplayValues();
-
-    for (let offset = 0; offset < width; offset++) {
-      const colIdx = startIdx + offset;
+    apiReadCalls += 2;
+    for (let i = 0; i < sorted.length; i++) {
+      const colIdx = sorted[i];
+      const offset = colIdx - minIdx;
       const colValues = new Array(rowCount);
       const colDisplays = new Array(rowCount);
       for (let r = 0; r < rowCount; r++) {
@@ -4574,8 +6452,38 @@ function readComplianceColumnData_(sheet, startRow, rowCount, indexes) {
         displays: colDisplays
       };
     }
+  } else {
+    for (let i = 0; i < segments.length; i++) {
+      const startIdx = segments[i][0];
+      const endIdx = segments[i][1];
+      const width = endIdx - startIdx + 1;
+      const range = sheet.getRange(startRow, startIdx + 1, rowCount, width);
+      const values = range.getValues();
+      const displays = range.getDisplayValues();
+      apiReadCalls += 2;
+
+      for (let offset = 0; offset < width; offset++) {
+        const colIdx = startIdx + offset;
+        const colValues = new Array(rowCount);
+        const colDisplays = new Array(rowCount);
+        for (let r = 0; r < rowCount; r++) {
+          colValues[r] = values[r][offset];
+          colDisplays[r] = displays[r][offset];
+        }
+        data[colIdx] = {
+          values: colValues,
+          displays: colDisplays
+        };
+      }
+    }
   }
 
+  data.__meta = {
+    strategy: useSingleBlockRead ? 'single_block' : 'segmented',
+    segmentCount: segments.length,
+    spanWidth: spanWidth,
+    apiReadCalls: apiReadCalls
+  };
   return data;
 }
 
@@ -4743,3 +6651,4 @@ function parseEnumWithFallback_(value, allowedValues, fallback) {
   const normalized = String(value || '').trim().toUpperCase();
   return allowedValues.indexOf(normalized) >= 0 ? normalized : fallback;
 }
+

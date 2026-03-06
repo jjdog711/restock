@@ -2,7 +2,7 @@
 audience: manager,developer
 owner: Xylent Studios
 last-reviewed: 2026-03-06
-script-version: v2.1
+script-version: v2.2
 status: active
 ---
 
@@ -35,4 +35,5 @@ Baseline ranges are managed in [fixture-manifest.csv](fixture-manifest.csv).
 - `archive/*`
 
 ---
-_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.1 | Last reviewed: 2026-03-06_
+_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.2 | Last reviewed: 2026-03-06_
+

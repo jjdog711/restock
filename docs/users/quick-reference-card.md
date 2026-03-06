@@ -2,7 +2,7 @@
 audience: staff
 owner: State of Mind Operations + Xylent Studios
 last-reviewed: 2026-03-06
-script-version: v2.1
+script-version: v2.2
 status: active
 ---
 
@@ -16,8 +16,8 @@ Print this for the vault station.
 2. Sheet: `Treez Valuation (Raw)` and click `A6`
 3. `File -> Import -> Upload -> Replace data at selected cell`
 4. `Restock -> Run Daily Update`
-5. Review `No_Reserve_Risk`
-6. Work `Restock Checklist`
+5. Review `Backstock Alerts`
+6. Work `Restock List`
 
 ## Priority Levels
 
@@ -33,7 +33,7 @@ Print this for the vault station.
 
 ## Compliance Rules
 
-- Review `Missing_Compliance` every run
+- Review `Compliance Alerts` every run
 - Escalate `MISSING_BOTH` immediately
 
 ## Common Help Path
@@ -43,4 +43,6 @@ Print this for the vault station.
 - Unknown location: tell manager to review queue
 
 ---
-_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.1 | Last reviewed: 2026-03-06_
+_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.2 | Last reviewed: 2026-03-06_
+
+

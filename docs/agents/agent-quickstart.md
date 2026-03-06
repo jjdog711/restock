@@ -2,7 +2,7 @@
 audience: ai-agent
 owner: Xylent Studios
 last-reviewed: 2026-03-06
-script-version: v2.1
+script-version: v2.2
 status: active
 ---
 
@@ -14,8 +14,9 @@ This is the AI coding entrypoint for the current multi-profile system.
 
 1. [Architecture](../developers/architecture.md)
 2. [Code Map](../developers/code-map.md)
-3. [Manager Operations Guide](../managers/operations-guide.md)
-4. [Reference Index](../reference/index.md)
+3. [Manager Confidence Pack](../managers/start-here.md)
+4. [Manager Operations Guide](../managers/operations-guide.md)
+5. [Reference Index](../reference/index.md)
 
 ## Non-Negotiables
 
@@ -50,4 +51,5 @@ Legacy v1 specs and prior agent docs are in:
 Treat archived docs as historical context only.
 
 ---
-_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.1 | Last reviewed: 2026-03-06_
+_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.2 | Last reviewed: 2026-03-06_
+

@@ -2,7 +2,7 @@
 audience: staff
 owner: State of Mind Operations + Xylent Studios
 last-reviewed: 2026-03-06
-script-version: v2.1
+script-version: v2.2
 status: active
 ---
 
@@ -13,11 +13,12 @@ This manual is for daily staff operation. No hidden-tab edits are required.
 ## Daily Flow
 
 1. Import Treez CSV to `Treez Valuation (Raw)!A6`
-2. Open `Daily Home`
+2. Open `Home`
 3. Run `Restock -> Run Daily Update`
-4. Review `No_Reserve_Risk`
-5. Work `Restock Checklist`
-6. Review `Missing_Compliance`
+4. If routed to `Compliance Alerts`, resolve compliance issues first
+5. Review `Backstock Alerts`
+6. Work `Restock List`
+7. Confirm `Compliance Alerts` is clear or assigned
 
 ## What `Run Daily Update` Does
 
@@ -27,14 +28,15 @@ This manual is for daily staff operation. No hidden-tab edits are required.
 4. Refreshes checklist and no-reserve risk view
 5. Runs THC/expiration compliance audit
 6. Logs run health and outcomes
+7. Routes to `Compliance Alerts` when flagged, otherwise `Restock List`
 
 ## Tabs You Use
 
-- `Daily Home`
+- `Home`
 - `Treez Valuation (Raw)`
-- `No_Reserve_Risk`
-- `Restock Checklist`
-- `Missing_Compliance`
+- `Backstock Alerts`
+- `Restock List`
+- `Compliance Alerts`
 
 ## Checklist View Options
 
@@ -69,12 +71,12 @@ Profile resolution is automatic unless an admin sets a profile override.
 
 ### Auto-run did not run
 
-- Ask manager/admin to check trigger installation and run outcomes on `Daily Home`
+- Escalate to manager using [Manager Start Here](../managers/start-here.md)
 
 ### Run shows `BLOCKED_*`
 
 - Do not manually edit hidden tabs
-- Escalate to manager using the relevant runbook in `docs/runbooks`
+- Escalate through [Manager Start Here](../managers/start-here.md)
 
 ### Unknown location impact
 
@@ -82,4 +84,5 @@ Profile resolution is automatic unless an admin sets a profile override.
 - Manager reviews queue at `System_Reference -> LocationReviewQueue`
 
 ---
-_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.1 | Last reviewed: 2026-03-06_
+_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.2 | Last reviewed: 2026-03-06_
+

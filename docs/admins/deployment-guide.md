@@ -2,7 +2,7 @@
 audience: admin
 owner: Xylent Studios
 last-reviewed: 2026-03-06
-script-version: v2.1
+script-version: v2.2
 status: active
 ---
 
@@ -24,8 +24,8 @@ status: active
 
 Expected tabs include:
 
-- Staff: `Daily Home`, `Instructions`, `Treez Valuation (Raw)`, `No_Reserve_Risk`, `Restock Checklist`, `Missing_Compliance`
-- Manager/Admin: `Restock Settings`, `Compliance Config`, `Compliance Log`, `Data Exceptions`
+- Staff: `Home`, `Start Here`, `Treez Valuation (Raw)`, `Backstock Alerts`, `Restock List`, `Compliance Alerts`
+- Manager/Admin: `Restock Settings`, `Compliance Config`, `Compliance History`, `Data Watchlist`
 - Hidden: `Restock Engine (Internal)`, `System_Reference`, `System_Diagnostics`
 
 ## 2. Profile and mapping setup
@@ -83,4 +83,6 @@ Restore path:
 - Overlapping runs produce `SKIPPED_LOCKED`
 
 ---
-_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.1 | Last reviewed: 2026-03-06_
+_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.2 | Last reviewed: 2026-03-06_
+
+

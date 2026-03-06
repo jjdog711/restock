@@ -2,7 +2,7 @@
 audience: manager,developer
 owner: Xylent Studios + State of Mind Management
 last-reviewed: 2026-03-06
-script-version: v2.1
+script-version: v2.2
 status: active
 ---
 
@@ -20,7 +20,7 @@ Priorities are intentionally separated from current production commitments.
 
 - Reorder recommendation sheet for zero-reserve criticals
 - Daily exception digest export for management handoff
-- Optional profile-specific SOP prompts on `Daily Home`
+- Optional profile-specific SOP prompts on `Home`
 
 ## P2 Later
 
@@ -41,4 +41,6 @@ Priorities are intentionally separated from current production commitments.
 - Performance and safety baselines cannot regress
 
 ---
-_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.1 | Last reviewed: 2026-03-06_
+_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.2 | Last reviewed: 2026-03-06_
+
+

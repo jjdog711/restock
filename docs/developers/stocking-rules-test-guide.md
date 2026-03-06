@@ -2,7 +2,7 @@
 audience: developer
 owner: Xylent Studios
 last-reviewed: 2026-03-06
-script-version: v2.1
+script-version: v2.2
 status: active
 ---
 
@@ -20,8 +20,8 @@ This guide validates checklist threshold behavior after rule changes.
 
 1. Edit rules in `Restock Settings`
 2. Run `Restock -> Run Checklist Only`
-3. Confirm `Restock Checklist` count and urgency distribution
-4. Confirm `No_Reserve_Risk` still reflects zero-reserve rows correctly
+3. Confirm `Restock List` count and urgency distribution
+4. Confirm `Backstock Alerts` still reflects zero-reserve rows correctly
 5. If rule behavior looks wrong, run `Restock -> Run System Check`
 
 ## Rule Matching Expectations
@@ -52,4 +52,6 @@ This guide validates checklist threshold behavior after rule changes.
 - `FAILED_STAGE_CHECKLIST`: inspect latest diagnostics stage details
 
 ---
-_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.1 | Last reviewed: 2026-03-06_
+_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.2 | Last reviewed: 2026-03-06_
+
+

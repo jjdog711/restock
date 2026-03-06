@@ -2,21 +2,28 @@
 audience: manager
 owner: State of Mind Management + Xylent Studios
 last-reviewed: 2026-03-06
-script-version: v2.1
+script-version: v2.2
 status: active
 ---
 
 # Manager Operations Guide
 
-Use this guide for governance, diagnostics, and escalation.
+## Use This Page
+
+Optional deep dive. Read this after:
+
+1. [Start Here](start-here.md)
+2. [How Decisions Are Made](how-decisions-are-made.md)
+3. [When to Override](when-to-override.md)
 
 ## Daily Manager Checklist
 
 1. Confirm staff imported CSV to `Treez Valuation (Raw)!A6`
 2. Confirm `Run Daily Update` completed
-3. Review `Daily Home` run summary and health block
-4. Review `No_Reserve_Risk` and `Missing_Compliance`
-5. Review unknown-location queue if warnings exist
+3. Review `Home` run summary and health block
+4. Confirm run landed on `Compliance Alerts` when flagged, otherwise `Restock List`
+5. Review `Backstock Alerts` and `Compliance Alerts`
+6. Review unknown-location queue if warnings exist
 
 ## Profile Governance
 
@@ -85,5 +92,12 @@ Runbook links:
 - [Failed Stage Compliance](../runbooks/failed-stage-compliance.md)
 - [Failed Exception](../runbooks/failed-exception.md)
 
+## Communication Support
+
+- [Cutover Brief Script](cutover-brief-script.md)
+- [Cutover Week Check-Ins](cutover-week-checkins.md)
+- [Manager FAQ](faq.md)
+
 ---
-_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.1 | Last reviewed: 2026-03-06_
+_State of Mind Vault Restock System | Built by Xylent Studios | Steward: Justin Michalke | Script v2.2 | Last reviewed: 2026-03-06_
+
